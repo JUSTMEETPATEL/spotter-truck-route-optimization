@@ -6,6 +6,7 @@ import requests
 from apps.routing.exceptions import NoRouteFound, RoutingProviderUnavailable
 from apps.routing.geo import Point
 from apps.routing.providers import OsrmClient
+from tests.conftest import FakeResponse
 
 DALLAS = Point(32.7767, -96.7970)
 CHICAGO = Point(41.8781, -87.6298)
@@ -23,15 +24,6 @@ OK_BODY = {
         }
     ],
 }
-
-
-class FakeResponse:
-    def __init__(self, payload: dict, status_code: int = 200):
-        self._payload = payload
-        self.status_code = status_code
-
-    def json(self) -> dict:
-        return self._payload
 
 
 @pytest.fixture

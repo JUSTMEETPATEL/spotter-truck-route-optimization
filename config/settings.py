@@ -39,6 +39,7 @@ env = environ.Env(
         "https://prd-tnm.s3.amazonaws.com/StagedProducts/GeographicNames/DomesticNames/"
         "DomesticNames_National_Text.zip",
     ),
+    GAZETTEER_DOWNLOAD_TIMEOUT_SECONDS=(float, 300.0),
     OSRM_BASE_URL=(str, "https://router.project-osrm.org"),
     OSRM_TIMEOUT_SECONDS=(float, 10.0),
     OSRM_RETRIES=(int, 1),
@@ -137,6 +138,9 @@ GAZETTEER_COVERAGE_FLOOR = env("GAZETTEER_COVERAGE_FLOOR")
 GAZETTEER_PLACES_URL = env("GAZETTEER_PLACES_URL")
 GAZETTEER_COUSUBS_URL = env("GAZETTEER_COUSUBS_URL")
 GAZETTEER_GNIS_URL = env("GAZETTEER_GNIS_URL")
+#: Source archives run to tens of megabytes, so they get their own timeout
+#: rather than borrowing the routing provider's.
+GAZETTEER_DOWNLOAD_TIMEOUT_SECONDS = env("GAZETTEER_DOWNLOAD_TIMEOUT_SECONDS")
 
 OSRM_BASE_URL = env("OSRM_BASE_URL")
 OSRM_TIMEOUT_SECONDS = env("OSRM_TIMEOUT_SECONDS")

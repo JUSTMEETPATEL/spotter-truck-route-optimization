@@ -5,8 +5,8 @@ anything exposing a Mile Marker and a price, which in production is a
 :class:`~apps.routing.corridor.MatchedCandidate` and in tests is a two-field
 tuple.
 
-The greedy rule and the argument for its optimality are recorded in
-``docs/adr/0001-greedy-refuelling-over-dynamic-programming.md``.
+The greedy rule, and the exchange argument that makes it optimal, are set out
+under "The optimizer" in the README.
 """
 
 from collections.abc import Sequence
@@ -177,7 +177,9 @@ def plan_purchases(
     index = 0
     gallons_in_tank = 0.0
 
-    while candidates:
+    # At most one decision per Candidate: every branch below either finishes
+    # the trip or moves strictly forward, so this cannot spin.
+    for _ in range(len(candidates)):
         current = candidates[index]
         remaining_miles = total_distance_miles - current.mile_marker
         reachable = _reachable_from(candidates, index, max_range_miles)
@@ -230,7 +232,7 @@ def naive_cost(
     gallons_in_tank = 0.0
     index = 0
 
-    while candidates:
+    for _ in range(len(candidates)):
         current = candidates[index]
         remaining_miles = total_distance_miles - current.mile_marker
         if remaining_miles <= max_range_miles:

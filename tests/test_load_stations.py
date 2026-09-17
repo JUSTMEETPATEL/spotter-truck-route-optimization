@@ -7,7 +7,7 @@ import pytest
 from django.core.management import call_command
 
 from apps.stations import registry
-from apps.stations.management.commands.load_stations import STATION_FIELDS
+from apps.stations.management.commands.build_station_data import STATION_FIELDS
 from apps.stations.models import Station
 
 pytestmark = pytest.mark.django_db

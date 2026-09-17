@@ -10,8 +10,7 @@ import pytest
 
 from apps.routing.exceptions import NoRouteFound
 from apps.routing.geo import Point
-from apps.routing.providers import OsrmClient
-from apps.routing.services import RouteRequest, plan_route
+from apps.routing.services import RouteRequest, default_provider, plan_route
 
 pytestmark = pytest.mark.live
 
@@ -20,18 +19,8 @@ CHICAGO = Point(41.8781, -87.6298)
 HONOLULU = Point(21.3069, -157.8583)
 
 
-def live_client() -> OsrmClient:
-    from django.conf import settings
-
-    return OsrmClient(
-        base_url=settings.OSRM_BASE_URL,
-        timeout_seconds=settings.OSRM_TIMEOUT_SECONDS,
-        retries=settings.OSRM_RETRIES,
-    )
-
-
 def test_the_provider_answers_with_a_plausible_route():
-    route = live_client().route(DALLAS, CHICAGO)
+    route = default_provider().route(DALLAS, CHICAGO)
     assert 900 < route.distance_miles < 1100
     assert 12 < route.duration_hours < 24
     assert route.shape_points > 1000
@@ -40,7 +29,7 @@ def test_the_provider_answers_with_a_plausible_route():
 
 def test_an_island_has_no_road_route():
     with pytest.raises(NoRouteFound):
-        live_client().route(HONOLULU, DALLAS)
+        default_provider().route(HONOLULU, DALLAS)
 
 
 @pytest.mark.django_db

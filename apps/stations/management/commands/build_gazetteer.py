@@ -42,6 +42,7 @@ from apps.stations.geocoding import (
     US_STATE_CODES,
     Gazetteer,
     GazetteerPlace,
+    inside_us_bounds,
     normalize_city,
     places_from_census_rows,
 )
@@ -143,11 +144,17 @@ class Command(BaseCommand):
                 state = US_STATE_CODES.get((row.get("state_name") or "").strip())
                 if not (latitude and longitude and name and state):
                     continue
+                point = Point(float(latitude), float(longitude))
+                # 5,603 GNIS populated places carry 0.0, 0.0 for an unmapped
+                # feature. Left in, one of them put three Atlanta truckstops
+                # in the Gulf of Guinea.
+                if not inside_us_bounds(point):
+                    continue
                 places.append(
                     GazetteerPlace(
                         name=normalize_city(name),
                         state=state,
-                        point=Point(float(latitude), float(longitude)),
+                        point=point,
                         area_sqmi=0.0,
                         tier=TIER_GNIS,
                     )
@@ -172,7 +179,9 @@ class Command(BaseCommand):
         """Fetch a source archive to a temporary file and return its path."""
         self.stdout.write(f"  downloading {url}")
         try:
-            response = requests.get(url, timeout=settings.OSRM_TIMEOUT_SECONDS * 30, stream=True)
+            response = requests.get(
+                url, timeout=settings.GAZETTEER_DOWNLOAD_TIMEOUT_SECONDS, stream=True
+            )
             response.raise_for_status()
             handle = NamedTemporaryFile(suffix=".zip", delete=False)  # noqa: SIM115
             with handle:

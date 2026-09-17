@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from apps.routing.exceptions import OutsideUnitedStates, PlaceNotFound
 from apps.routing.geo import Point, haversine_miles
-from apps.stations.cleaning import CANADIAN_PROVINCES
+from apps.stations.cleaning import CANADIAN_PROVINCE_NAMES, CANADIAN_PROVINCES
 from apps.stations.geocoding import US_STATE_CODES, Gazetteer
 
 _COORDINATE_PAIR = re.compile(
@@ -26,21 +26,6 @@ _COORDINATE_PAIR = re.compile(
 #: USPS codes for the states and territories, plus their spelled-out names.
 _STATE_BY_NAME = {name.upper(): code for name, code in US_STATE_CODES.items()}
 _STATE_CODES = frozenset(US_STATE_CODES.values())
-_PROVINCE_NAMES = {
-    "AB": "Alberta",
-    "BC": "British Columbia",
-    "MB": "Manitoba",
-    "NB": "New Brunswick",
-    "NL": "Newfoundland and Labrador",
-    "NS": "Nova Scotia",
-    "NT": "Northwest Territories",
-    "NU": "Nunavut",
-    "ON": "Ontario",
-    "PE": "Prince Edward Island",
-    "QC": "Quebec",
-    "SK": "Saskatchewan",
-    "YT": "Yukon",
-}
 
 
 @dataclass(frozen=True)
@@ -126,7 +111,7 @@ def _resolve_place_name(query: str, gazetteer: Gazetteer) -> ResolvedEndpoint:
     state = _state_code(state_token)
     if state in CANADIAN_PROVINCES:
         raise OutsideUnitedStates(
-            f"{_PROVINCE_NAMES.get(state, state)} is not in the USA, and this service "
+            f"{CANADIAN_PROVINCE_NAMES.get(state, state)} is not in the USA, and this service "
             "plans routes inside the USA only.",
             nearest_place=None,
         )

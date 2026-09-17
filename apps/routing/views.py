@@ -7,7 +7,6 @@ import json
 from typing import Any
 
 from django.conf import settings
-from django.core.cache import cache
 from django.db import connection
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
@@ -31,7 +30,7 @@ from apps.routing.serializers import (
     RouteRequestSerializer,
     StationSerializer,
 )
-from apps.routing.services import CACHE_KEY_TEMPLATE, plan_route
+from apps.routing.services import plan_for_map, plan_route, tank_gallons
 from apps.stations import registry
 from apps.stations.models import Station
 
@@ -115,6 +114,7 @@ class HealthView(APIView):
                     "stations_total": report.get("stations_total"),
                     "stations_geocoded": report.get("stations_geocoded"),
                     "stations_excluded": report.get("stations_excluded"),
+                    "stations_out_of_us_bounds": report.get("stations_out_of_us_bounds"),
                     "stations_from_overrides": report.get("stations_from_overrides"),
                     "gazetteer_entries": report.get("gazetteer_entries"),
                     "gazetteer_coverage": report.get("gazetteer_coverage"),
@@ -130,7 +130,7 @@ class HealthView(APIView):
                 "vehicle_defaults": {
                     "max_range_miles": settings.FUEL_MAX_RANGE_MILES,
                     "mpg": settings.FUEL_MPG,
-                    "tank_gallons": settings.FUEL_MAX_RANGE_MILES / settings.FUEL_MPG,
+                    "tank_gallons": tank_gallons(settings.FUEL_MAX_RANGE_MILES, settings.FUEL_MPG),
                     "corridor_miles": settings.CORRIDOR_MILES,
                 },
             }
@@ -164,27 +164,13 @@ class StationListView(ListAPIView):
 
 
 def route_map(request: HttpRequest, route_token: str) -> HttpResponse:
-    """The Leaflet page for a Route Token.
-
-    Served from the cache when the plan is still there. When it has expired,
-    the page recomputes through the same service if the request parameters came
-    along on the query string -- one routing call, rather than a dead link in
-    the middle of a demo.
-    """
-    payload = cache.get(CACHE_KEY_TEMPLATE.format(token=route_token))
-    if payload is None:
-        serializer = RouteRequestSerializer(data=request.GET)
-        if not serializer.is_valid():
-            raise Http404(
-                "This map link has expired. Re-run the route to get a fresh one, or add "
-                "?start=…&finish=… to this URL to recompute it."
-            )
-        try:
-            payload = plan_route(serializer.to_route_request())
-        except FuelRouteError as error:
-            raise Http404(error.message) from error
-        if payload["meta"]["route_token"] != route_token:
-            raise Http404("Those parameters do not describe this route.")
+    """The Leaflet page for a Route Token."""
+    serializer = RouteRequestSerializer(data=request.GET)
+    recompute_with = serializer.to_route_request() if serializer.is_valid() else None
+    try:
+        payload = plan_for_map(route_token, recompute_with)
+    except FuelRouteError as error:
+        raise Http404(error.message) from error
 
     return render(
         request,

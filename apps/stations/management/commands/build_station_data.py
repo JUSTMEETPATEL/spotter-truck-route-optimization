@@ -16,7 +16,6 @@ it reads committed files and writes committed files.
 
 import csv
 import json
-from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,8 +23,13 @@ from typing import Any
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from apps.stations.cleaning import Station, clean_price_observations
-from apps.stations.geocoding import Gazetteer
+from apps.stations.cleaning import clean_price_observations
+from apps.stations.geocoding import (
+    Gazetteer,
+    GeocodingResult,
+    geocode_stations,
+    read_city_overrides,
+)
 
 STATION_FIELDS = (
     "opis_id",
@@ -64,7 +68,7 @@ class Command(BaseCommand):
                 f"No Gazetteer at {gazetteer_path}. Run `manage.py build_gazetteer` first."
             )
         gazetteer = Gazetteer.from_csv(gazetteer_path)
-        overrides = _read_overrides(Path(options["overrides_csv"]))
+        overrides = read_city_overrides(Path(options["overrides_csv"]))
 
         with Path(options["prices_csv"]).open(newline="", encoding="utf-8-sig") as handle:
             cleaning = clean_price_observations(csv.DictReader(handle))
@@ -76,61 +80,31 @@ class Command(BaseCommand):
             f"{cleaning.unusable_observations_dropped:,} unusable)"
         )
 
-        geocoded: list[tuple[Station, float, float]] = []
-        excluded: Counter[tuple[str, str]] = Counter()
-        per_state: dict[str, Counter[str]] = {}
-        override_hits = 0
-
-        for station in cleaning.stations:
-            counts = per_state.setdefault(station.state, Counter())
-            counts["stations"] += 1
-            point = overrides.get((station.city.strip().upper(), station.state))
-            if point is not None:
-                override_hits += 1
-            else:
-                place = gazetteer.resolve(station.city, station.state)
-                point = (place.point.lat, place.point.lon) if place else None
-            if point is None:
-                excluded[(station.city, station.state)] += 1
-                continue
-            counts["geocoded"] += 1
-            geocoded.append((station, point[0], point[1]))
-
-        coverage = len(geocoded) / len(cleaning.stations) if cleaning.stations else 0.0
-        _write_stations(Path(options["output"]), geocoded)
-        coverage_by_state = {
-            state: {
-                "stations": counts["stations"],
-                "geocoded": counts["geocoded"],
-                "coverage": round(counts["geocoded"] / counts["stations"], 4),
-            }
-            for state, counts in sorted(per_state.items())
-        }
-        report: dict[str, Any] = {
+        placement = geocode_stations(cleaning.stations, gazetteer, overrides)
+        _write_stations(Path(options["output"]), placement)
+        report = {
             "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "gazetteer_entries": len(gazetteer),
             "observations_read": cleaning.observations_read,
             "non_us_observations_dropped": cleaning.non_us_observations_dropped,
             "unusable_observations_dropped": cleaning.unusable_observations_dropped,
-            "stations_total": len(cleaning.stations),
-            "stations_geocoded": len(geocoded),
-            "stations_excluded": sum(excluded.values()),
-            "stations_from_overrides": override_hits,
-            "gazetteer_coverage": round(coverage, 6),
-            "coverage_by_state": coverage_by_state,
-            "excluded_cities": [
-                {"city": city, "state": state, "stations": count}
-                for (city, state), count in sorted(excluded.items(), key=lambda kv: (-kv[1], kv[0]))
-            ],
+            "stations_total": placement.stations_total,
+            "stations_geocoded": len(placement.placed),
+            "stations_excluded": sum(placement.excluded.values()),
+            "stations_out_of_us_bounds": sum(placement.out_of_bounds.values()),
+            "stations_from_overrides": placement.from_overrides,
+            "gazetteer_coverage": round(placement.coverage, 6),
+            "coverage_by_state": placement.coverage_by_state(),
+            "excluded_cities": placement.excluded_cities(),
         }
         Path(options["report"]).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
         self.stdout.write(
-            f"Geocoded {len(geocoded):,}/{len(cleaning.stations):,} Stations "
-            f"({coverage:.2%}), {override_hits:,} from hand corrections"
+            f"Geocoded {len(placement.placed):,}/{placement.stations_total:,} Stations "
+            f"({placement.coverage:.2%}), {placement.from_overrides:,} from hand corrections"
         )
         worst = sorted(
-            coverage_by_state.items(),
+            placement.coverage_by_state().items(),
             key=lambda item: (item[1]["coverage"], -item[1]["stations"]),
         )[:8]
         for state, tally in worst:
@@ -139,35 +113,21 @@ class Command(BaseCommand):
             )
 
         floor = settings.GAZETTEER_COVERAGE_FLOOR
-        if coverage < floor:
-            message = f"Coverage {coverage:.2%} is below the {floor:.0%} floor."
+        if placement.coverage < floor:
+            message = f"Coverage {placement.coverage:.2%} is below the {floor:.0%} floor."
             if options["strict"]:
                 raise CommandError(message)
             self.stdout.write(self.style.WARNING(message))
         self.stdout.write(self.style.SUCCESS(f"Wrote {options['output']} and {options['report']}"))
 
 
-def _read_overrides(path: Path) -> dict[tuple[str, str], tuple[float, float]]:
-    """Hand corrections for cities the Gazetteer cannot resolve."""
-    if not path.exists():
-        return {}
-    with path.open(newline="", encoding="utf-8") as handle:
-        return {
-            (row["city"].strip().upper(), row["state"].strip().upper()): (
-                float(row["latitude"]),
-                float(row["longitude"]),
-            )
-            for row in csv.DictReader(handle)
-            if row.get("city") and not row["city"].startswith("#")
-        }
-
-
-def _write_stations(path: Path, geocoded: list[tuple[Station, float, float]]) -> None:
+def _write_stations(path: Path, placement: GeocodingResult) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(STATION_FIELDS)
-        for station, latitude, longitude in geocoded:
+        for placed in placement.placed:
+            station = placed.station
             writer.writerow(
                 [
                     station.opis_id,
@@ -175,8 +135,8 @@ def _write_stations(path: Path, geocoded: list[tuple[Station, float, float]]) ->
                     station.address,
                     station.city,
                     station.state,
-                    f"{latitude:.6f}",
-                    f"{longitude:.6f}",
+                    f"{placed.point.lat:.6f}",
+                    f"{placed.point.lon:.6f}",
                     f"{station.price_mean:.6f}",
                     f"{station.price_min:.6f}",
                     f"{station.price_max:.6f}",

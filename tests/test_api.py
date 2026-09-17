@@ -10,6 +10,7 @@ from apps.routing.geo import Point
 from apps.stations import geocoding, registry
 from apps.stations.geocoding import Gazetteer, GazetteerPlace
 from apps.stations.models import Station
+from tests.conftest import FakeResponse
 
 pytestmark = pytest.mark.django_db
 
@@ -29,19 +30,6 @@ OSRM_BODY = {
         }
     ],
 }
-
-
-class FakeResponse:
-    def __init__(self, payload: dict, status_code: int = 200):
-        self._payload = payload
-        self.status_code = status_code
-
-    def json(self) -> dict:
-        return self._payload
-
-    def raise_for_status(self) -> None:
-        if self.status_code >= 400:
-            raise requests.HTTPError(str(self.status_code))
 
 
 @pytest.fixture
@@ -72,6 +60,7 @@ def _offline_gazetteer(monkeypatch):
             GazetteerPlace("WESTVILLE", "KS", START, 30.0, 3),
             GazetteerPlace("EASTVILLE", "OH", FINISH, 30.0, 3),
             GazetteerPlace("TORONTO", "OH", Point(40.46, -80.60), 3.0, 3),
+            GazetteerPlace("HONOLULU", "HI", Point(21.3069, -157.8583), 68.0, 3),
         ]
     )
     monkeypatch.setattr(geocoding, "load_gazetteer", lambda: gazetteer)
@@ -125,6 +114,7 @@ class TestRoutePlanning:
         response = post(client)
         assert response.status_code == 200
         body = response.json()
+        assert body["meta"]["compute_ms"] > 0
         assert body["fuel"]["feasible"] is True
         assert body["fuel"]["total_cost_usd"] > 0
         assert body["route"]["shape_points"] == 185
@@ -224,6 +214,21 @@ class TestProviderFailures:
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "no_route_found"
 
+    def test_hawaii_is_accepted_and_then_has_no_road_route(self, client, provider, stations):
+        # Hawaii is the USA, so requirement 1 accepts it; the provider then
+        # says there is no road, with the body shape it really sends.
+        provider.reply = FakeResponse(
+            {"message": "Impossible route between points", "code": "NoRoute"}, status_code=400
+        )
+        response = post(client, start="Honolulu, HI")
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "no_route_found"
+
+    def test_an_error_body_is_nested_under_one_key_as_published(self, client, provider):
+        body = post(client, start="Atlantis, KS").json()
+        assert set(body) == {"error"}
+        assert set(body["error"]) >= {"code", "message"}
+
     def test_an_unreachable_provider_is_a_five_oh_three(self, client, provider, stations):
         provider.reply = requests.Timeout("gone")
         response = post(client)
@@ -277,10 +282,18 @@ class TestOtherEndpoints:
         assert body["backends"]["database"] == "sqlite"
         assert body["vehicle_defaults"]["tank_gallons"] == 50.0
 
-    def test_health_publishes_the_excluded_count(self, client):
-        body = client.get(reverse("health")).json()
-        assert "stations_excluded" in body["dataset"]
-        assert "excluded_cities" in body["dataset"]
+    def test_health_publishes_every_exclusion_count(self, client):
+        dataset = client.get(reverse("health")).json()["dataset"]
+        # A reviewer should be able to see what the dataset does not cover
+        # without reading the build output.
+        for field in (
+            "stations_excluded",
+            "stations_out_of_us_bounds",
+            "excluded_cities",
+            "coverage_by_state",
+            "gazetteer_coverage",
+        ):
+            assert field in dataset
 
     def test_stations_can_be_browsed_and_filtered(self, client, stations):
         body = client.get(reverse("station-list")).json()

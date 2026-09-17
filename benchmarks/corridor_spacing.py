@@ -24,14 +24,18 @@ import django  # noqa: E402  -- Django has to be configured before the apps impo
 
 django.setup()
 
+from django.conf import settings  # noqa: E402
+
 from apps.routing.corridor import match_corridor  # noqa: E402
 from apps.routing.geo import Point  # noqa: E402
 from apps.stations.registry import candidates  # noqa: E402
 
 FIXTURE = REPO_ROOT / "tests" / "fixtures" / "dallas_chicago_route.json"
+#: The spacing under test. Everything else comes from settings, so the sweep
+#: measures the configured Corridor rather than one invented here.
 SPACINGS = (0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 25.0)
-CELL_DEGREES = 0.5
-CORRIDOR_MILES = 10.0
+CELL_DEGREES = settings.CORRIDOR_GRID_CELL_DEGREES
+CORRIDOR_MILES = settings.CORRIDOR_MILES
 REPEATS = 3
 
 

@@ -29,9 +29,12 @@ $ curl -s -X POST localhost:8000/api/v1/route/ \
 
 `naive_cost_usd` is not an average of corridor prices. It is a **simulated
 driver** over the same route under the same range limit, who runs the tank down
-and fills up at whatever truckstop is nearest, ignoring price. Both drivers buy
-the same total gallons, so the difference is purely *where* the fuel was bought
-— which is the only thing this service controls.
+and fills up at whatever truckstop is nearest, ignoring price. Its last
+purchase is trimmed to what finishing the trip needs, so both drivers buy
+exactly the same total gallons and the difference is purely *where* the fuel
+was bought — which is the only thing this service controls. That trim makes the
+reported saving **conservative**: a driver who really did fill the tank one
+last time would pay more than the figure above.
 
 ---
 
@@ -137,7 +140,9 @@ second cannot.
    detouring off a route, while the origin fill is about reaching the first
    purchase at all, on an empty tank. A stop at mile 0 may therefore sit
    further off-route than `max_detour_miles`, and its
-   `detour_miles_to_city` says so.
+   `detour_miles_to_city` says so. If that same truckstop also lies in the
+   corridor further along, its later position is dropped: it is one truckstop,
+   and mile 0 is the only place an empty tank can reach it.
 3. **Repeated price rows for one truckstop are averaged.** 568 OPIS IDs appear
    more than once. The file has no date column, so recency is unknowable and
    the mean is the only defensible summary; the minimum would quote a total the
@@ -167,6 +172,11 @@ second cannot.
    profile; the optimizer is unchanged, only the geometry improves.
 9. **Prices are diesel retail per gallon**, as supplied. Mean $3.417, range
    $2.687–$6.399.
+10. **Tank capacity is derived, never configured.** It is range ÷ mpg — 50
+    gallons at the defaults — computed wherever it is shown. There is
+    deliberately no `TANK_GALLONS` setting, because both of its inputs are
+    request-overridable and a stored constant would report 50 while the two
+    response fields beside it said otherwise.
 
 ---
 
@@ -320,11 +330,21 @@ public-domain sources:
 |---|---|---|
 | US Census Gazetteer — Places | 33,140 | Incorporated places and CDPs |
 | US Census Gazetteer — County Subdivisions | 37,447 | The Northeast names its cities after townships ("Mahwah, NJ"), which Places omits |
-| USGS GNIS — populated places | 185,317 | The unincorporated communities truckstops actually sit in ("Ruther Glen, VA", "Breezewood, PA") |
+| USGS GNIS — populated places | 184,987 | The unincorporated communities truckstops actually sit in ("Ruther Glen, VA", "Breezewood, PA") |
 
-183,271 distinct place keys after deduplication, 8.6 MB, committed. Each source
+182,946 distinct place keys after deduplication, 8.2 MB, committed. Each source
 indexes below the one above it, so a named Census place always wins a contested
 name.
+
+Every entry is checked against a crude US bounding box on the way in, and
+**5,603 GNIS populated places are dropped because they carry 0.0, 0.0** for an
+unmapped feature. That filter is not theoretical: "Ellenwood, GA" is one of
+them, and without it three Atlanta truckstops were being placed in the Gulf of
+Guinea. The same check runs again when stations are placed, and the count of
+anything it rejects is published at `/api/v1/health/` as
+`stations_out_of_us_bounds`. The box is a garbage filter, not a containment
+test — Mexico City is inside it — which is why deciding whether an *endpoint*
+is in the USA is a separate, finer test.
 
 Matching is the part the data actually forced:
 
@@ -341,12 +361,12 @@ Matching is the part the data actually forced:
   Township, NJ" for the subdivision the Census calls "Monroe township".
 - Keep a space-squashed index, so "Mc Calla" reaches "McCalla".
 
-**Result: 6,625 of 6,626 truckstops placed — 99.98%.** Six cities absent from
-all three sources are hand-corrected in
-[`data/city_overrides.csv`](data/city_overrides.csv), every row citing the GNIS
-feature its coordinate came from. The last one, **Etters, PA (1 truckstop)**,
-is left excluded rather than given an invented coordinate, and
-`/api/v1/health/` publishes that.
+**Result: 6,625 of 6,626 truckstops placed — 99.98%.** Seven cities absent from
+all three sources, or misplaced by them, are hand-corrected in
+[`data/city_overrides.csv`](data/city_overrides.csv) — 12 truckstops between
+them, every row citing the GNIS feature its coordinate came from. The last one,
+**Etters, PA (1 truckstop)**, is left excluded rather than given an invented
+coordinate, and `/api/v1/health/` publishes that.
 
 This matters more than a percentage suggests: an excluded truckstop can
 manufacture a range-exceeding gap and report a perfectly drivable route as
@@ -395,7 +415,10 @@ remainder.
 | New York → Miami | 1,280 | 1.13 s | 4 | $377.15 | $444.82 | 15.2% |
 | Portland ME → San Diego | 3,130 | 2.06 s | 21 | $961.46 | $1,109.67 | 13.4% |
 
-A cached repeat of any of them is **under 2 ms and zero external calls**.
+A cached repeat of any of them is **under 2 ms and zero external calls**. Every
+response carries `meta.compute_ms`, which is what *that* caller waited for —
+the cached path reports its own figure rather than replaying the first
+caller's — so none of the above has to be taken on trust.
 
 Savings vary honestly with the corridor. Where truckstops are dense and prices
 tight (Dallas → Chicago), a driver who just stops when the tank runs low does
@@ -450,6 +473,16 @@ environment. There are no magic numbers elsewhere in the source tree. See
 | `ROUTE_CACHE_TTL_SECONDS` | 86400 | no |
 | `ROUTE_TOKEN_LENGTH` | 16 | no |
 
+Four more are read only by `build_gazetteer`, the one command that downloads
+anything:
+
+| Setting | Default |
+|---|---|
+| `GAZETTEER_PLACES_URL` | Census 2023 Gazetteer Places |
+| `GAZETTEER_COUSUBS_URL` | Census 2023 Gazetteer County Subdivisions |
+| `GAZETTEER_GNIS_URL` | USGS GNIS Domestic Names |
+| `GAZETTEER_DOWNLOAD_TIMEOUT_SECONDS` | 300.0 |
+
 Env-readable is not the same as request-overridable. The internal knobs —
 thinning spacing, grid cell size, origin fill radius — are deliberately not
 exposed to callers.
@@ -463,7 +496,7 @@ so that a fresh clone runs.
 ## Tests
 
 ```bash
-uv run pytest                 # 297 tests, no network
+uv run pytest                 # 329 tests, no network
 uv run pytest -m live         # 3 more, against the real OSRM. Run before a demo
 uv run ruff check . && uv run mypy apps config
 ```
@@ -485,6 +518,9 @@ The ones worth knowing about:
 | Feasibility | Gaps between candidates, the final leg to the destination, and the empty-tank first gap |
 | Cache policy | Identical payload on repeat, shared token across input forms, infeasible cached, 503 not cached |
 | Bounds | Every parameter at and beyond each limit |
+| Geocoding | Overrides beat the Gazetteer, per-state coverage arithmetic, unresolved excluded *and counted*, and coordinates that cannot be in the USA rejected rather than used |
+| Build gate | Low coverage warns by default and fails under `--strict` |
+| Endpoints | Hawaii accepted as the USA, then 404 from the provider's real `NoRoute` body |
 
 ---
 

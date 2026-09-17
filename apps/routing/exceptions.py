@@ -29,3 +29,12 @@ class NoRouteFound(FuelRouteError):
 
 class RoutingProviderUnavailable(FuelRouteError):
     """The routing provider could not be reached. HTTP 503."""
+
+
+class MapLinkUnavailable(FuelRouteError):
+    """A map link whose plan has expired and cannot be recomputed. HTTP 404.
+
+    The Route Token is a hash, so it cannot be turned back into a request. A
+    link that outlives its cache entry can only be honoured if the request
+    parameters came along with it.
+    """

@@ -16,14 +16,11 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from apps.stations import registry
-from apps.stations.management.commands.build_station_data import STATION_FIELDS
 from apps.stations.models import Station
 
 #: Rows per bulk insert. Large enough to be fast, small enough for SQLite's
 #: parameter limit.
 BATCH_SIZE = 500
-
-__all__ = ["Command", "STATION_FIELDS"]
 
 
 class Command(BaseCommand):

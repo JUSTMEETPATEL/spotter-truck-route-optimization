@@ -13,16 +13,18 @@ its own; nothing below it knows there is an HTTP request involved.
 """
 
 import hashlib
+import time
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from django.conf import settings
 from django.core.cache import cache
 from django.urls import reverse
 
 from apps.routing.corridor import Candidate, MatchedCandidate, match_corridor
+from apps.routing.exceptions import MapLinkUnavailable
 from apps.routing.geo import Point, haversine_miles
-from apps.routing.optimizer import FuelPlan, plan_purchases
+from apps.routing.optimizer import FuelPlan, Stop, plan_purchases
 from apps.routing.providers import OsrmClient, Route
 from apps.routing.resolver import ResolvedEndpoint, resolve_endpoint
 from apps.stations.geocoding import Gazetteer, load_gazetteer
@@ -43,8 +45,16 @@ class RouteRequest:
 
     @property
     def tank_gallons(self) -> float:
-        """Derived, never configured: Range / mpg."""
-        return self.max_range_miles / self.mpg
+        return tank_gallons(self.max_range_miles, self.mpg)
+
+
+def tank_gallons(max_range_miles: float, mpg: float) -> float:
+    """The most fuel the truck can hold: Range / mpg.
+
+    Derived wherever it is shown, never stored. A stored constant would report
+    50 gallons while the two fields beside it said otherwise.
+    """
+    return max_range_miles / mpg
 
 
 class RouteProvider(Protocol):
@@ -63,6 +73,7 @@ def plan_route(
     The collaborators are injectable so that the components can be tested
     without a database, a network or a cache between them.
     """
+    started = time.perf_counter()
     gazetteer = gazetteer if gazetteer is not None else load_gazetteer()
     radius = settings.US_CONTAINMENT_RADIUS_MILES
     start = resolve_endpoint(request.start, gazetteer, radius)
@@ -71,9 +82,19 @@ def plan_route(
     token = route_token(start.point, finish.point, request)
     cached = cache.get(CACHE_KEY_TEMPLATE.format(token=token))
     if cached is not None:
-        return cached | {"meta": cached["meta"] | {"cached": True, "external_api_calls": 0}}
+        return cached | {
+            "meta": cached["meta"]
+            | {
+                "cached": True,
+                "external_api_calls": 0,
+                # The stored figure is what the first caller waited for. This
+                # one is what this caller waited for, which is the point of
+                # reporting it.
+                "compute_ms": _elapsed_ms(started),
+            }
+        }
 
-    provider = provider if provider is not None else _default_provider()
+    provider = provider if provider is not None else default_provider()
     route = provider.route(start.point, finish.point)
 
     all_candidates = (
@@ -91,7 +112,33 @@ def plan_route(
 
     plan = plan_purchases(sequence, route.distance_miles, request.max_range_miles, request.mpg)
     payload = _payload(request, start, finish, route, matched, sequence, plan, token)
+    payload["meta"]["compute_ms"] = _elapsed_ms(started)
     cache.set(CACHE_KEY_TEMPLATE.format(token=token), payload, settings.ROUTE_CACHE_TTL_SECONDS)
+    return payload
+
+
+def plan_for_map(route_token: str, request: RouteRequest | None) -> dict[str, Any]:
+    """The plan behind a map link.
+
+    Served from the cache while it is there. Once it has expired the link can
+    still be honoured if the request parameters travelled with it, which costs
+    one routing call rather than 404-ing someone mid-demo. The recomputed plan
+    has to hash back to the same token, or the link is not describing it.
+    """
+    cached = cache.get(CACHE_KEY_TEMPLATE.format(token=route_token))
+    if cached is not None:
+        return cached
+    if request is None:
+        raise MapLinkUnavailable(
+            "This map link has expired. Re-run the route for a fresh one, or add "
+            "?start=…&finish=… to this URL to recompute it.",
+            route_token=route_token,
+        )
+    payload = plan_route(request)
+    if payload["meta"]["route_token"] != route_token:
+        raise MapLinkUnavailable(
+            "Those parameters do not describe this route.", route_token=route_token
+        )
     return payload
 
 
@@ -116,7 +163,8 @@ def route_token(start: Point, finish: Point, request: RouteRequest) -> str:
     return digest[: settings.ROUTE_TOKEN_LENGTH]
 
 
-def _default_provider() -> OsrmClient:
+def default_provider() -> OsrmClient:
+    """The configured routing provider."""
     return OsrmClient(
         base_url=settings.OSRM_BASE_URL,
         timeout_seconds=settings.OSRM_TIMEOUT_SECONDS,
@@ -190,23 +238,30 @@ def _payload(
             "feasible": plan.feasible,
             "infeasible_stretch": _stretch(plan, sequence, route.distance_miles),
             "total_gallons": round(plan.total_gallons, 2),
-            "total_cost_usd": _money(plan.total_cost_usd),
+            "total_cost_usd": _round(plan.total_cost_usd, 2),
             "average_price_per_gallon": _round(plan.average_price_per_gallon, 3),
             "stops_count": plan.stops_count,
-            "naive_cost_usd": _money(plan.naive_cost_usd),
-            "savings_usd": _money(plan.savings_usd),
+            "naive_cost_usd": _round(plan.naive_cost_usd, 2),
+            "savings_usd": _round(plan.savings_usd, 2),
             "savings_percent": _round(plan.savings_percent, 2),
         },
         "fuel_stops": [_stop(stop) for stop in plan.stops],
         "meta": {
             "external_api_calls": route.provider_calls,
             "cached": False,
+            "compute_ms": None,
             "stations_in_corridor": sum(entry.candidate.stations_at_location for entry in matched),
             "candidates_considered": len(sequence),
             "map_url": reverse("route-map", kwargs={"route_token": token}),
             "route_token": token,
         },
     }
+
+
+def _elapsed_ms(started: float) -> float:
+    # Two decimals, because a warm cache hit is tens of microseconds and one
+    # decimal would report it as 0.0.
+    return round((time.perf_counter() - started) * 1000, 2)
 
 
 def _endpoint(endpoint: ResolvedEndpoint) -> dict[str, Any]:
@@ -220,9 +275,14 @@ def _endpoint(endpoint: ResolvedEndpoint) -> dict[str, Any]:
     }
 
 
-def _stop(stop: Any) -> dict[str, Any]:
-    entry: MatchedCandidate = stop.candidate
-    candidate = entry.candidate
+def _stop(stop: Stop) -> dict[str, Any]:
+    # A Stop wraps the matched Candidate, which wraps the Candidate itself:
+    # the purchase, where it sits on this route, and the truckstop.
+    # In production a Stop's Candidate is always one matched against this
+    # route; the optimizer accepts anything priced so that it can be tested
+    # with plain tuples.
+    matched = cast(MatchedCandidate, stop.candidate)
+    candidate = matched.candidate
     return {
         "sequence": stop.sequence,
         "opis_id": candidate.opis_id,
@@ -231,8 +291,8 @@ def _stop(stop: Any) -> dict[str, Any]:
         "state": candidate.state,
         "latitude": round(candidate.point.lat, 6),
         "longitude": round(candidate.point.lon, 6),
-        "mile_marker": round(entry.mile_marker, 1),
-        "detour_miles_to_city": round(entry.detour_miles, 2),
+        "mile_marker": round(matched.mile_marker, 1),
+        "detour_miles_to_city": round(matched.detour_miles, 2),
         "stations_at_location": candidate.stations_at_location,
         "price_per_gallon": round(candidate.price_per_gallon, 4),
         "gallons": round(stop.gallons, 2),
@@ -260,10 +320,6 @@ def _stretch(
         "to": label(stretch.to_index, stretch.to_mile, "destination"),
         "gap_miles": round(stretch.gap_miles, 1),
     }
-
-
-def _money(value: float | None) -> float | None:
-    return None if value is None else round(value, 2)
 
 
 def _round(value: float | None, digits: int) -> float | None:

@@ -1,13 +1,14 @@
 {
-  "generated_at": "2026-09-17T22:24:54+00:00",
-  "gazetteer_entries": 183271,
+  "generated_at": "2026-09-17T22:54:07+00:00",
+  "gazetteer_entries": 182946,
   "observations_read": 8151,
   "non_us_observations_dropped": 620,
   "unusable_observations_dropped": 0,
   "stations_total": 6626,
   "stations_geocoded": 6625,
   "stations_excluded": 1,
-  "stations_from_overrides": 9,
+  "stations_out_of_us_bounds": 0,
+  "stations_from_overrides": 12,
   "gazetteer_coverage": 0.999849,
   "coverage_by_state": {
     "AL": {

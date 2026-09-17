@@ -15,10 +15,25 @@ from dataclasses import dataclass, field
 
 from apps.routing.corridor import opis_sort_key
 
-#: Province codes in the supplied file. The brief scopes to the USA.
-CANADIAN_PROVINCES = frozenset(
-    {"AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT"}
-)
+#: The provinces in the supplied file, by code. The brief scopes to the USA,
+#: so their rows are dropped -- and the spelled-out names let the API say
+#: "Ontario is not in the USA" rather than echoing a code back.
+CANADIAN_PROVINCE_NAMES = {
+    "AB": "Alberta",
+    "BC": "British Columbia",
+    "MB": "Manitoba",
+    "NB": "New Brunswick",
+    "NL": "Newfoundland and Labrador",
+    "NS": "Nova Scotia",
+    "NT": "Northwest Territories",
+    "NU": "Nunavut",
+    "ON": "Ontario",
+    "PE": "Prince Edward Island",
+    "QC": "Quebec",
+    "SK": "Saskatchewan",
+    "YT": "Yukon",
+}
+CANADIAN_PROVINCES = frozenset(CANADIAN_PROVINCE_NAMES)
 
 
 @dataclass(frozen=True)

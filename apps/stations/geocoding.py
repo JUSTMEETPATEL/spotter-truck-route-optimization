@@ -16,11 +16,13 @@ import csv
 import math
 import re
 import unicodedata
+from collections import Counter
 from collections.abc import Iterable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
-from apps.routing.geo import Point, haversine_miles
+from apps.routing.geo import MILES_PER_DEGREE_LATITUDE, Point, haversine_miles
 
 #: Legal suffixes the Census appends to a place name, longest first so that
 #: "city and borough" wins over "city".
@@ -115,6 +117,22 @@ TIER_PLACE = 3
 TIER_PLACE_ALIAS = 2
 TIER_SUBDIVISION = 1
 TIER_SUBDIVISION_ALIAS = 0
+
+
+#: Plausible bounds for a US coordinate, wide enough for Alaska (including the
+#: Aleutians, which cross the antimeridian), Hawaii and Puerto Rico. A resolved
+#: coordinate outside them means a bad Gazetteer row, not a real place, and is
+#: safer excluded and counted than quietly planned around.
+US_LATITUDE_BOUNDS = (17.5, 72.0)
+US_LONGITUDE_BOUNDS = ((-180.0, -64.5), (172.0, 180.0))
+
+
+def inside_us_bounds(point: Point) -> bool:
+    """Whether a coordinate could plausibly be in the USA at all."""
+    low, high = US_LATITUDE_BOUNDS
+    if not low <= point.lat <= high:
+        return False
+    return any(west <= point.lon <= east for west, east in US_LONGITUDE_BOUNDS)
 
 
 def normalize_city(name: str) -> str:
@@ -248,7 +266,7 @@ class Gazetteer:
             # haversine, and it discards almost everything.
             if (
                 radius_miles is not None
-                and abs(place.point.lat - point.lat) * _MILES_PER_DEGREE_LAT > radius_miles
+                and abs(place.point.lat - point.lat) * MILES_PER_DEGREE_LATITUDE > radius_miles
             ):
                 continue
             distance = haversine_miles(point, place.point)
@@ -339,9 +357,6 @@ def _squash(name: str) -> str:
     return name.replace(" ", "")
 
 
-_MILES_PER_DEGREE_LAT = 69.1
-
-
 def places_from_census_rows(
     rows: Iterable[dict[str, str]],
     name_field: str,
@@ -354,8 +369,10 @@ def places_from_census_rows(
         row = {(key or "").strip(): (value or "").strip() for key, value in row.items()}
         if not row.get("INTPTLAT") or not row.get("INTPTLONG"):
             continue
-        canonical = canonical_place_name(row[name_field])
         point = Point(float(row["INTPTLAT"]), float(row["INTPTLONG"]))
+        if not inside_us_bounds(point):
+            continue
+        canonical = canonical_place_name(row[name_field])
         area = float(row.get("ALAND_SQMI") or 0.0)
         state = row["USPS"]
         places.append(
@@ -372,3 +389,116 @@ def places_from_census_rows(
             for alias in place_aliases(canonical)
         )
     return places
+
+
+# --- placing Stations -------------------------------------------------------
+
+
+def read_city_overrides(path: Path) -> dict[tuple[str, str], Point]:
+    """Hand corrections for cities the Gazetteer cannot resolve.
+
+    Keyed by normalized city and state, so a correction matches the same
+    spellings the Gazetteer would have.
+    """
+    path = Path(path)
+    if not path.exists():
+        return {}
+    with path.open(newline="", encoding="utf-8") as handle:
+        return {
+            (normalize_city(row["city"]), row["state"].strip().upper()): Point(
+                float(row["latitude"]), float(row["longitude"])
+            )
+            for row in csv.DictReader(handle)
+            if row.get("city") and not row["city"].startswith("#")
+        }
+
+
+@dataclass(frozen=True)
+class PlacedStation:
+    """A Station with the coordinate the Gazetteer or an override gave it."""
+
+    station: Any
+    point: Point
+    from_override: bool
+
+
+@dataclass
+class GeocodingResult:
+    """Which Stations were placed, which were not, and how that falls by state."""
+
+    placed: list[PlacedStation] = field(default_factory=list)
+    excluded: Counter = field(default_factory=Counter)
+    out_of_bounds: Counter = field(default_factory=Counter)
+    stations_by_state: Counter = field(default_factory=Counter)
+    placed_by_state: Counter = field(default_factory=Counter)
+    from_overrides: int = 0
+
+    @property
+    def stations_total(self) -> int:
+        return sum(self.stations_by_state.values())
+
+    @property
+    def coverage(self) -> float:
+        """The fraction of Stations that got a coordinate."""
+        total = self.stations_total
+        return len(self.placed) / total if total else 0.0
+
+    def coverage_by_state(self) -> dict[str, dict[str, float]]:
+        """Coverage per state, because a national percentage hides the risk.
+
+        A miss in Texas is noise among 776 Stations; a miss in Nevada among 71
+        can turn a drivable route infeasible.
+        """
+        return {
+            state: {
+                "stations": self.stations_by_state[state],
+                "geocoded": self.placed_by_state[state],
+                "coverage": round(self.placed_by_state[state] / self.stations_by_state[state], 4),
+            }
+            for state in sorted(self.stations_by_state)
+        }
+
+    def excluded_cities(self) -> list[dict[str, Any]]:
+        """Every city that cost a Station, worst first, for publication."""
+        return [
+            {"city": city, "state": state, "stations": count}
+            for (city, state), count in sorted(
+                self.excluded.items(), key=lambda item: (-item[1], item[0])
+            )
+        ]
+
+
+def geocode_stations(
+    stations: Iterable[Any],
+    gazetteer: Gazetteer,
+    overrides: dict[tuple[str, str], Point] | None = None,
+) -> GeocodingResult:
+    """Place each Station at its city, preferring a hand correction.
+
+    Overrides win over the Gazetteer: they exist precisely because the
+    Gazetteer is wrong or silent about that city.
+    """
+    overrides = overrides or {}
+    result = GeocodingResult()
+    for station in stations:
+        result.stations_by_state[station.state] += 1
+        point = overrides.get((normalize_city(station.city), station.state))
+        from_override = point is not None
+        if point is None:
+            found = gazetteer.resolve(station.city, station.state)
+            point = found.point if found is not None else None
+
+        if point is None:
+            result.excluded[(station.city, station.state)] += 1
+            continue
+        if not inside_us_bounds(point):
+            result.excluded[(station.city, station.state)] += 1
+            result.out_of_bounds[(station.city, station.state)] += 1
+            continue
+
+        result.from_overrides += from_override
+        result.placed_by_state[station.state] += 1
+        result.placed.append(
+            PlacedStation(station=station, point=point, from_override=from_override)
+        )
+    return result

@@ -155,6 +155,9 @@ class FuelStopSerializer(serializers.Serializer):
 class MetaSerializer(serializers.Serializer):
     external_api_calls = serializers.IntegerField()
     cached = serializers.BooleanField()
+    compute_ms = serializers.FloatField(
+        help_text="What this caller waited for, cache lookup included."
+    )
     stations_in_corridor = serializers.IntegerField()
     candidates_considered = serializers.IntegerField()
     map_url = serializers.CharField()
@@ -172,10 +175,20 @@ class RoutePlanSerializer(serializers.Serializer):
     meta = MetaSerializer()
 
 
+class ErrorBodySerializer(serializers.Serializer):
+    """What an error actually carries."""
+
+    code = serializers.CharField(help_text="Stable machine-readable code, e.g. place_not_found.")
+    message = serializers.CharField(help_text="A sentence naming what went wrong.")
+    detail = serializers.DictField(
+        required=False, help_text="Field errors, or the nearest place found."
+    )
+
+
 class ErrorSerializer(serializers.Serializer):
-    code = serializers.CharField()
-    message = serializers.CharField()
-    detail = serializers.DictField(required=False)
+    """Errors are nested under one key, so a client can branch on its presence."""
+
+    error = ErrorBodySerializer()
 
 
 class StationSerializer(serializers.Serializer):

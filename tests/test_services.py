@@ -6,7 +6,12 @@ from django.core.cache import cache
 from apps.routing.exceptions import RoutingProviderUnavailable
 from apps.routing.geo import Point
 from apps.routing.providers import Route
-from apps.routing.services import RouteRequest, plan_route, route_token
+from apps.routing.services import (
+    CACHE_KEY_TEMPLATE,
+    RouteRequest,
+    plan_route,
+    route_token,
+)
 from apps.stations import registry
 from apps.stations.geocoding import Gazetteer, GazetteerPlace
 from apps.stations.models import Station
@@ -226,6 +231,25 @@ class TestDisclosure:
         payload, _ = run()
         assert payload["meta"]["stations_in_corridor"] == 3
         assert payload["meta"]["candidates_considered"] == 2
+
+    def test_compute_ms_is_what_this_caller_waited_for(self, stations):
+        first, _ = run()
+        assert first["meta"]["compute_ms"] > 0
+
+        stored = cache.get(CACHE_KEY_TEMPLATE.format(token=first["meta"]["route_token"]))
+        second, _ = run()
+        # A warm cache hit can be faster than the reporting resolution, so
+        # this is the honest bound.
+        assert second["meta"]["compute_ms"] >= 0
+        # The cached entry keeps the first caller's figure untouched, and the
+        # repeat reports its own rather than replaying that one.
+        assert stored["meta"]["compute_ms"] == first["meta"]["compute_ms"]
+        assert (
+            cache.get(CACHE_KEY_TEMPLATE.format(token=first["meta"]["route_token"]))["meta"][
+                "compute_ms"
+            ]
+            == first["meta"]["compute_ms"]
+        )
 
     def test_the_map_url_carries_the_route_token(self, stations):
         payload, _ = run()
