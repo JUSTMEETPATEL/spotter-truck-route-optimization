@@ -24,6 +24,21 @@ env = environ.Env(
     US_CONTAINMENT_RADIUS_MILES=(float, 50.0),
     COORD_ROUNDING_DECIMALS=(int, 4),
     GAZETTEER_COVERAGE_FLOOR=(float, 0.98),
+    GAZETTEER_PLACES_URL=(
+        str,
+        "https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2023_Gazetteer/"
+        "2023_Gaz_place_national.zip",
+    ),
+    GAZETTEER_COUSUBS_URL=(
+        str,
+        "https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2023_Gazetteer/"
+        "2023_Gaz_cousubs_national.zip",
+    ),
+    GAZETTEER_GNIS_URL=(
+        str,
+        "https://prd-tnm.s3.amazonaws.com/StagedProducts/GeographicNames/DomesticNames/"
+        "DomesticNames_National_Text.zip",
+    ),
     OSRM_BASE_URL=(str, "https://router.project-osrm.org"),
     OSRM_TIMEOUT_SECONDS=(float, 10.0),
     OSRM_RETRIES=(int, 1),
@@ -118,6 +133,11 @@ COORD_ROUNDING_DECIMALS = env("COORD_ROUNDING_DECIMALS")
 #: Build-time gate: the fraction of Stations the Gazetteer must resolve.
 GAZETTEER_COVERAGE_FLOOR = env("GAZETTEER_COVERAGE_FLOOR")
 
+#: Build-time only. ``build_gazetteer`` reads these; serving a request never does.
+GAZETTEER_PLACES_URL = env("GAZETTEER_PLACES_URL")
+GAZETTEER_COUSUBS_URL = env("GAZETTEER_COUSUBS_URL")
+GAZETTEER_GNIS_URL = env("GAZETTEER_GNIS_URL")
+
 OSRM_BASE_URL = env("OSRM_BASE_URL")
 OSRM_TIMEOUT_SECONDS = env("OSRM_TIMEOUT_SECONDS")
 OSRM_RETRIES = env("OSRM_RETRIES")
@@ -131,3 +151,4 @@ SUPPLIED_PRICES_CSV = DATA_DIR / "fuel-prices-for-be-assessment.csv"
 GAZETTEER_CSV = DATA_DIR / "gazetteer.csv"
 CITY_OVERRIDES_CSV = DATA_DIR / "city_overrides.csv"
 STATIONS_GEOCODED_CSV = DATA_DIR / "stations_geocoded.csv"
+BUILD_REPORT_JSON = DATA_DIR / "build_report.json"
