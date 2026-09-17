@@ -7,10 +7,18 @@ arithmetic -- rejecting the large majority. An exact pass then projects the
 survivors onto the original geometry's segments, which both measures the Detour
 properly and yields the Mile Marker from the along-segment fraction.
 
+The coarse pass also says *where* along the route each survivor is near, so the
+exact pass projects onto the handful of segments in that neighbourhood rather
+than all of them. On a 966-mile route that is a few dozen segments instead of
+9,143, and it costs no accuracy: a foot of perpendicular within the Corridor is
+always within ``thinning_miles`` along the route of a sampled point that the
+coarse pass kept.
+
 Imports nothing from Django: plain data in, plain data out.
 """
 
 import math
+from bisect import bisect_left, bisect_right
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
@@ -99,9 +107,14 @@ def match_corridor(
 
     matched: list[MatchedCandidate] = []
     for candidate in candidates:
-        if not _near_thinned_route(candidate.point, grid, grid_cell_degrees, slack_miles):
+        segments = _nearby_segments(
+            candidate.point, grid, grid_cell_degrees, slack_miles, cumulative, thinning_miles
+        )
+        if not segments:
             continue
-        detour_miles, mile_marker = _project_onto_geometry(candidate.point, geometry, cumulative)
+        detour_miles, mile_marker = _project_onto_segments(
+            candidate.point, geometry, cumulative, segments
+        )
         if detour_miles <= corridor_miles:
             matched.append(
                 MatchedCandidate(
@@ -120,32 +133,38 @@ _GridCell = tuple[int, int]
 
 def _thin(
     geometry: Sequence[Point], cumulative: Sequence[float], thinning_miles: float
-) -> list[Point]:
+) -> list[tuple[Point, float]]:
     """Resample the route to one point roughly every ``thinning_miles``.
 
-    Resampling rather than dropping points, so the spacing guarantee holds even
-    where the provider returns two shape points hundreds of miles apart.
+    Each sample keeps its distance along the route, which is what lets the
+    exact pass narrow down to a neighbourhood of segments. Resampling rather
+    than dropping points, so the spacing guarantee holds even where the
+    provider returns two shape points hundreds of miles apart.
     """
     if thinning_miles <= 0.0:
-        return list(geometry)
+        return list(zip(geometry, cumulative, strict=True))
 
-    thinned = [geometry[0]]
+    thinned = [(geometry[0], cumulative[0])]
     next_mile = thinning_miles
     for index in range(len(geometry) - 1):
         start_mile, end_mile = cumulative[index], cumulative[index + 1]
         segment_miles = end_mile - start_mile
         while next_mile <= end_mile:
             fraction = 0.0 if segment_miles == 0.0 else (next_mile - start_mile) / segment_miles
-            thinned.append(_interpolate(geometry[index], geometry[index + 1], fraction))
+            thinned.append(
+                (_interpolate(geometry[index], geometry[index + 1], fraction), next_mile)
+            )
             next_mile += thinning_miles
-    thinned.append(geometry[-1])
+    thinned.append((geometry[-1], cumulative[-1]))
     return thinned
 
 
-def _bucket(points: Sequence[Point], cell_degrees: float) -> dict[_GridCell, list[Point]]:
-    grid: dict[_GridCell, list[Point]] = {}
-    for point in points:
-        grid.setdefault(_cell_of(point, cell_degrees), []).append(point)
+def _bucket(
+    samples: Sequence[tuple[Point, float]], cell_degrees: float
+) -> dict[_GridCell, list[tuple[Point, float]]]:
+    grid: dict[_GridCell, list[tuple[Point, float]]] = {}
+    for sample in samples:
+        grid.setdefault(_cell_of(sample[0], cell_degrees), []).append(sample)
     return grid
 
 
@@ -156,20 +175,40 @@ def _cell_of(point: Point, cell_degrees: float) -> _GridCell:
     )
 
 
-def _near_thinned_route(
+def _nearby_segments(
     point: Point,
-    grid: dict[_GridCell, list[Point]],
+    grid: dict[_GridCell, list[tuple[Point, float]]],
     cell_degrees: float,
     slack_miles: float,
-) -> bool:
+    cumulative: Sequence[float],
+    thinning_miles: float,
+) -> list[int]:
+    """Indices of the segments worth projecting ``point`` onto.
+
+    Empty when the coarse pass rejects the Candidate outright, which is the
+    usual answer.
+    """
     lat_cell, lon_cell = _cell_of(point, cell_degrees)
     lat_ring, lon_ring = _ring_radius(point, cell_degrees, slack_miles)
+    near_miles: list[float] = []
     for d_lat in range(-lat_ring, lat_ring + 1):
         for d_lon in range(-lon_ring, lon_ring + 1):
-            for route_point in grid.get((lat_cell + d_lat, lon_cell + d_lon), ()):
+            for route_point, mile in grid.get((lat_cell + d_lat, lon_cell + d_lon), ()):
                 if _planar_within(point, route_point, slack_miles):
-                    return True
-    return False
+                    near_miles.append(mile)
+    if not near_miles:
+        return []
+
+    # A sample at mile m vouches for the route within thinning_miles either
+    # side of it, so every segment overlapping that window has to be measured.
+    window = max(thinning_miles, 0.0)
+    segments: set[int] = set()
+    last = len(cumulative) - 2
+    for mile in near_miles:
+        first_index = max(0, bisect_right(cumulative, mile - window) - 1)
+        last_index = min(last, bisect_left(cumulative, mile + window))
+        segments.update(range(first_index, last_index + 1))
+    return sorted(segments)
 
 
 def _ring_radius(point: Point, cell_degrees: float, slack_miles: float) -> tuple[int, int]:
@@ -198,13 +237,16 @@ def _planar_within(a: Point, b: Point, miles: float) -> bool:
 # --- exact pass -------------------------------------------------------------
 
 
-def _project_onto_geometry(
-    point: Point, geometry: Sequence[Point], cumulative: Sequence[float]
+def _project_onto_segments(
+    point: Point,
+    geometry: Sequence[Point],
+    cumulative: Sequence[float],
+    segments: Iterable[int],
 ) -> tuple[float, float]:
     """Distance from ``point`` to the route, and the Mile Marker of the foot."""
     best_distance = math.inf
     best_mile = 0.0
-    for index in range(len(geometry) - 1):
+    for index in segments:
         start, end = geometry[index], geometry[index + 1]
         fraction = _projection_fraction(start, end, point)
         foot = _interpolate(start, end, fraction)

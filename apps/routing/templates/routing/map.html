@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+{% load static %}
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fuel Route — {{ payload.request.start.name }} to {{ payload.request.finish.name }}</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <style>
+    :root {
+      --ink: #14181d;
+      --paper: #f7f7f5;
+      --line: #d9d9d4;
+      --accent: #1d5fd0;
+      --good: #14794a;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; font: 15px/1.45 system-ui, -apple-system, sans-serif; color: var(--ink); }
+    body { display: flex; flex-direction: column; }
+    header { padding: 12px 16px; background: var(--paper); border-bottom: 1px solid var(--line); }
+    h1 { margin: 0 0 6px; font-size: 17px; font-weight: 650; }
+    .figures { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; }
+    .figures div { white-space: nowrap; }
+    .figures b { font-variant-numeric: tabular-nums; }
+    .saving { color: var(--good); }
+    .warn { color: #a3341c; }
+    #map { flex: 1 1 auto; min-height: 320px; }
+    .pin {
+      background: var(--accent); color: #fff; border-radius: 50%;
+      width: 24px; height: 24px; display: grid; place-items: center;
+      font-size: 12px; font-weight: 700; box-shadow: 0 1px 4px rgba(0,0,0,.4);
+    }
+    .leaflet-popup-content { font: 13px/1.4 system-ui, sans-serif; }
+    .leaflet-popup-content b { font-size: 14px; }
+    table.stops { border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+    table.stops td { padding: 1px 6px 1px 0; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>{{ payload.request.start.name }} &rarr; {{ payload.request.finish.name }}</h1>
+  <div class="figures">
+    <div>{{ payload.route.total_distance_miles }} mi</div>
+    <div>{{ payload.route.total_duration_hours }} h</div>
+    {% if payload.fuel.feasible %}
+      <div><b>${{ payload.fuel.total_cost_usd }}</b> fuel</div>
+      <div>{{ payload.fuel.total_gallons }} gal @ ${{ payload.fuel.average_price_per_gallon }}/gal</div>
+      <div>{{ payload.fuel.stops_count }} stop{{ payload.fuel.stops_count|pluralize }}</div>
+      <div class="saving">saves <b>${{ payload.fuel.savings_usd }}</b>
+        ({{ payload.fuel.savings_percent }}%) vs ${{ payload.fuel.naive_cost_usd }} naive</div>
+    {% else %}
+      <div class="warn">No legal fuelling plan:
+        {{ payload.fuel.infeasible_stretch.gap_miles }} mi from
+        {{ payload.fuel.infeasible_stretch.from }} to {{ payload.fuel.infeasible_stretch.to }}</div>
+    {% endif %}
+    <div>{{ payload.meta.external_api_calls }} external call{{ payload.meta.external_api_calls|pluralize }}{% if payload.meta.cached %}, cached{% endif %}</div>
+  </div>
+</header>
+<div id="map"></div>
+
+<script id="plan" type="application/json">{{ payload_json|safe }}</script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+  const plan = JSON.parse(document.getElementById("plan").textContent);
+  const map = L.map("map", { scrollWheelZoom: true });
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 18,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  // GeoJSON is longitude first; Leaflet wants latitude first.
+  const line = plan.route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+  const route = L.polyline(line, { color: "#1d5fd0", weight: 4, opacity: 0.85 }).addTo(map);
+  map.fitBounds(route.getBounds(), { padding: [24, 24] });
+
+  const endpoint = (point, label, colour) =>
+    L.circleMarker([point.latitude, point.longitude], {
+      radius: 7, color: "#fff", weight: 2, fillColor: colour, fillOpacity: 1
+    }).addTo(map).bindPopup(`<b>${label}</b><br>${point.name}`);
+
+  endpoint(plan.request.start, "Start", "#14794a");
+  endpoint(plan.request.finish, "Finish", "#a3341c");
+
+  const money = (value) => value == null ? "—" : `$${value.toFixed(2)}`;
+
+  for (const stop of plan.fuel_stops) {
+    L.marker([stop.latitude, stop.longitude], {
+      icon: L.divIcon({
+        className: "",
+        html: `<div class="pin">${stop.sequence}</div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      })
+    }).addTo(map).bindPopup(`
+      <b>${stop.name}</b><br>
+      ${stop.city}, ${stop.state} &middot; mile ${stop.mile_marker}
+      <table class="stops">
+        <tr><td>Price</td><td>$${stop.price_per_gallon.toFixed(4)}/gal</td></tr>
+        <tr><td>Bought</td><td>${stop.gallons.toFixed(2)} gal for ${money(stop.cost_usd)}</td></tr>
+        <tr><td>On departure</td><td>${stop.gallons_remaining_after.toFixed(2)} gal</td></tr>
+        <tr><td>Detour to city</td><td>${stop.detour_miles_to_city} mi</td></tr>
+        <tr><td>Stations here</td><td>${stop.stations_at_location}</td></tr>
+      </table>
+    `);
+  }
+</script>
+</body>
+</html>

@@ -11,9 +11,14 @@ not in ``AppConfig.ready()``: both run during ``migrate`` on a fresh clone,
 before the table exists.
 """
 
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 
 from apps.routing.corridor import Candidate, opis_sort_key
+
+if TYPE_CHECKING:
+    from apps.stations.models import Station
 
 
 class _Registry:
@@ -55,7 +60,7 @@ def _build() -> list[Candidate]:
     return [collapse(stations) for stations in groups.values()]
 
 
-def collapse(stations: list["Station"]) -> Candidate:  # noqa: F821
+def collapse(stations: list["Station"]) -> Candidate:
     """One Candidate for a coordinate: its cheapest Station and how many share it.
 
     Ties on price are broken by OPIS ID ascending, so a repeated request names

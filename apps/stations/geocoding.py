@@ -228,25 +228,35 @@ class Gazetteer:
         """
         return self._by_name.get(normalize_city(city))
 
-    def nearest(self, point: Point, radius_miles: float) -> GazetteerPlace | None:
+    def nearest(self, point: Point, radius_miles: float | None = None) -> GazetteerPlace | None:
         """The closest place within ``radius_miles``, or None if there is none.
 
-        This is the US containment test: a point with no US place near it is
-        not in the USA. It degrades better than a bounding box, which swallows
-        Ontario and much of northern Mexico, though it cannot separate Detroit
-        from Windsor -- so the caller names the place it found.
+        With no radius, the closest place in the country however far away --
+        which is what makes an out-of-country rejection actionable without
+        inventing a second radius to search.
+
+        A radius is the US containment test: a point with no US place near it
+        is not in the USA. It degrades better than a bounding box, which
+        swallows Ontario, Windsor and much of northern Mexico, though it cannot
+        separate Detroit from Windsor either -- so the caller names the place
+        it found.
         """
         best: GazetteerPlace | None = None
         best_distance = math.inf
         for place in self._places:
             # Reject on latitude first: it is one subtraction against a
             # haversine, and it discards almost everything.
-            if abs(place.point.lat - point.lat) * _MILES_PER_DEGREE_LAT > radius_miles:
+            if (
+                radius_miles is not None
+                and abs(place.point.lat - point.lat) * _MILES_PER_DEGREE_LAT > radius_miles
+            ):
                 continue
             distance = haversine_miles(point, place.point)
             if distance < best_distance:
                 best, best_distance = place, distance
-        return best if best_distance <= radius_miles else None
+        if radius_miles is not None and best_distance > radius_miles:
+            return None
+        return best
 
     # --- persistence --------------------------------------------------------
 
@@ -290,6 +300,28 @@ def _query_spellings(city: str) -> list[str]:
     normalized = normalize_city(city)
     canonical = normalize_city(canonical_place_name(city))
     return [normalized] if canonical == normalized else [normalized, canonical]
+
+
+_LOADED: dict[str, "Gazetteer"] = {}
+
+
+def load_gazetteer() -> Gazetteer:
+    """The committed Gazetteer, read from disk on first use and then kept.
+
+    Lazy for the same reason the Candidate registry is: nothing may touch a
+    data file or a table at import time, or ``migrate`` breaks on a fresh
+    clone.
+    """
+    from django.conf import settings
+
+    if "gazetteer" not in _LOADED:
+        _LOADED["gazetteer"] = Gazetteer.from_csv(settings.GAZETTEER_CSV)
+    return _LOADED["gazetteer"]
+
+
+def reset_gazetteer() -> None:
+    """Drop the loaded Gazetteer, so the next access reads the file again."""
+    _LOADED.clear()
 
 
 def _keep_best(index: dict, key, place: GazetteerPlace) -> None:

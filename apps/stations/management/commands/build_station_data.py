@@ -98,7 +98,15 @@ class Command(BaseCommand):
 
         coverage = len(geocoded) / len(cleaning.stations) if cleaning.stations else 0.0
         _write_stations(Path(options["output"]), geocoded)
-        report = {
+        coverage_by_state = {
+            state: {
+                "stations": counts["stations"],
+                "geocoded": counts["geocoded"],
+                "coverage": round(counts["geocoded"] / counts["stations"], 4),
+            }
+            for state, counts in sorted(per_state.items())
+        }
+        report: dict[str, Any] = {
             "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "gazetteer_entries": len(gazetteer),
             "observations_read": cleaning.observations_read,
@@ -109,14 +117,7 @@ class Command(BaseCommand):
             "stations_excluded": sum(excluded.values()),
             "stations_from_overrides": override_hits,
             "gazetteer_coverage": round(coverage, 6),
-            "coverage_by_state": {
-                state: {
-                    "stations": counts["stations"],
-                    "geocoded": counts["geocoded"],
-                    "coverage": round(counts["geocoded"] / counts["stations"], 4),
-                }
-                for state, counts in sorted(per_state.items())
-            },
+            "coverage_by_state": coverage_by_state,
             "excluded_cities": [
                 {"city": city, "state": state, "stations": count}
                 for (city, state), count in sorted(excluded.items(), key=lambda kv: (-kv[1], kv[0]))
@@ -129,12 +130,12 @@ class Command(BaseCommand):
             f"({coverage:.2%}), {override_hits:,} from hand corrections"
         )
         worst = sorted(
-            report["coverage_by_state"].items(),
+            coverage_by_state.items(),
             key=lambda item: (item[1]["coverage"], -item[1]["stations"]),
         )[:8]
-        for state, counts in worst:
+        for state, tally in worst:
             self.stdout.write(
-                f"  {state}: {counts['geocoded']}/{counts['stations']} ({counts['coverage']:.1%})"
+                f"  {state}: {tally['geocoded']}/{tally['stations']} ({tally['coverage']:.1%})"
             )
 
         floor = settings.GAZETTEER_COVERAGE_FLOOR

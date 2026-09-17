@@ -184,6 +184,10 @@ class TestUsContainment:
     def test_mexico_city_is_beyond_the_radius(self, gazetteer):
         assert gazetteer.nearest(Point(19.4326, -99.1332), radius_miles=50.0) is None
 
+    def test_without_a_radius_the_closest_place_anywhere_comes_back(self, gazetteer):
+        found = gazetteer.nearest(Point(19.4326, -99.1332))
+        assert found is not None and found.name == "SAN DIEGO"
+
     def test_the_nearest_place_is_the_one_returned(self, gazetteer):
         found = gazetteer.nearest(Point(42.87, -78.87), radius_miles=50.0)
         assert found is not None and found.name == "BUFFALO"
