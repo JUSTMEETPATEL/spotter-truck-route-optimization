@@ -32,7 +32,8 @@
               "path": [
                 "api",
                 "v1",
-                "route"
+                "route",
+                ""
               ]
             },
             "description": "The headline case: 961 miles, five Stops, one external call. Run it twice to see meta.cached and zero calls.",
@@ -60,7 +61,8 @@
               "path": [
                 "api",
                 "v1",
-                "route"
+                "route",
+                ""
               ]
             },
             "description": "1,280 miles, and the clearest saving against the Naive Driver (about 15%).",
@@ -88,7 +90,8 @@
               "path": [
                 "api",
                 "v1",
-                "route"
+                "route",
+                ""
               ]
             },
             "description": "3,130 miles and 21 Stops: the long-route case.",
@@ -116,7 +119,8 @@
               "path": [
                 "api",
                 "v1",
-                "route"
+                "route",
+                ""
               ]
             },
             "description": "The same route as Dallas to Chicago, by coordinate. Same Route Token, so it answers from the cache.",
@@ -144,7 +148,8 @@
               "path": [
                 "api",
                 "v1",
-                "route"
+                "route",
+                ""
               ]
             },
             "description": "mpg and max_range_miles are request-overridable; tank_gallons is derived from them.",
@@ -172,7 +177,8 @@
               "path": [
                 "api",
                 "v1",
-                "route"
+                "route",
+                ""
               ]
             },
             "description": "max_detour_miles widens the Corridor, so more Candidates are considered.",
@@ -195,7 +201,8 @@
               "path": [
                 "api",
                 "v1",
-                "route"
+                "route",
+                ""
               ],
               "query": [
                 {
@@ -234,7 +241,8 @@
               "path": [
                 "api",
                 "v1",
-                "route"
+                "route",
+                ""
               ]
             },
             "description": "200 with fuel.feasible false. Eight California Stations are in the supplied file and none is within 30 miles of Los Angeles, so the API names the stretch instead of inventing a price.",
@@ -262,7 +270,8 @@
               "path": [
                 "api",
                 "v1",
-                "route"
+                "route",
+                ""
               ]
             },
             "description": "2,268 miles, about 1,200 of them through British Columbia and Yukon where every row was dropped as non-US. The route is still returned.",
@@ -295,7 +304,8 @@
               "path": [
                 "api",
                 "v1",
-                "route"
+                "route",
+                ""
               ]
             },
             "description": "The message names what could not be resolved.",
@@ -323,7 +333,8 @@
               "path": [
                 "api",
                 "v1",
-                "route"
+                "route",
+                ""
               ]
             },
             "description": "Toronto resolves, but Ontario is not a US state.",
@@ -351,7 +362,8 @@
               "path": [
                 "api",
                 "v1",
-                "route"
+                "route",
+                ""
               ]
             },
             "description": "Mexico City: no US place within 50 miles. The error names the closest one.",
@@ -379,7 +391,8 @@
               "path": [
                 "api",
                 "v1",
-                "route"
+                "route",
+                ""
               ]
             },
             "description": "Honolulu is an island; the provider says so and the API returns 404.",
@@ -407,7 +420,8 @@
               "path": [
                 "api",
                 "v1",
-                "route"
+                "route",
+                ""
               ]
             },
             "description": "mpg is bounded 1-20, and the error names the bound.",
@@ -435,7 +449,8 @@
               "path": [
                 "api",
                 "v1",
-                "health"
+                "health",
+                ""
               ]
             },
             "description": "Station count, excluded count, Gazetteer coverage per state, and the active backends."
@@ -454,7 +469,8 @@
               "path": [
                 "api",
                 "v1",
-                "stations"
+                "stations",
+                ""
               ],
               "query": [
                 {
@@ -482,7 +498,8 @@
               ],
               "path": [
                 "api",
-                "docs"
+                "docs",
+                ""
               ]
             },
             "description": "The published schema, including the parameter bounds."

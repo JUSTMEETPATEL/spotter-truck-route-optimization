@@ -121,6 +121,21 @@ class TestRoutePlanning:
         assert body["meta"]["external_api_calls"] == 1
         assert provider.calls == 1
 
+    def test_a_post_without_the_trailing_slash_still_plans(self, client, provider, stations):
+        # Postman and curl users routinely drop the slash. Django cannot
+        # redirect a POST without losing its body, so this used to be a 500.
+        response = client.post(
+            "/api/v1/route",
+            {"start": "Westville, KS", "finish": "Eastville, OH"},
+            format="json",
+        )
+        assert response.status_code == 200
+        assert response.json()["fuel"]["feasible"] is True
+
+    @pytest.mark.parametrize("path", ["/api/v1/health", "/api/v1/stations"])
+    def test_every_endpoint_answers_without_the_trailing_slash(self, client, path):
+        assert client.get(path).status_code == 200
+
     def test_the_same_request_over_get_works_for_a_browser(self, client, provider, stations):
         response = client.get(
             reverse("route"), {"start": "Westville, KS", "finish": "Eastville, OH"}
