@@ -102,8 +102,8 @@ class GeometrySerializer(serializers.Serializer):
 class RouteSerializer(serializers.Serializer):
     total_distance_miles = serializers.FloatField()
     total_duration_hours = serializers.FloatField()
-    geometry = GeometrySerializer()
     shape_points = serializers.IntegerField()
+    geometry = GeometrySerializer()
 
 
 # "from" is a Python keyword, so this one serializer is assembled from a dict
@@ -165,14 +165,17 @@ class MetaSerializer(serializers.Serializer):
 
 
 class RoutePlanSerializer(serializers.Serializer):
-    """The full response. Built in ``services.py``; described here."""
+    """The full response. Built in ``services.py``; described here.
 
-    request = RequestEchoSerializer()
-    vehicle = VehicleSerializer()
-    route = RouteSerializer()
+    Answer first, geometry last, in the same order the service emits.
+    """
+
     fuel = FuelSerializer()
     fuel_stops = FuelStopSerializer(many=True)
+    request = RequestEchoSerializer()
+    vehicle = VehicleSerializer()
     meta = MetaSerializer()
+    route = RouteSerializer()
 
 
 class ErrorBodySerializer(serializers.Serializer):

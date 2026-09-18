@@ -121,6 +121,14 @@ class TestRoutePlanning:
         assert body["meta"]["external_api_calls"] == 1
         assert provider.calls == 1
 
+    def test_the_answer_comes_before_the_geometry(self, client, provider, stations):
+        # The geometry runs to tens of thousands of points (26,132 for Seattle
+        # to Anchorage). Anything after it is ~100,000 lines down in Postman,
+        # so the fuelling answer has to come first and the geometry last.
+        for body in (post(client).json(), post(client).json()):  # fresh, then cached
+            assert list(body) == ["fuel", "fuel_stops", "request", "vehicle", "meta", "route"]
+            assert list(body["route"])[-1] == "geometry"
+
     def test_a_post_without_the_trailing_slash_still_plans(self, client, provider, stations):
         # Postman and curl users routinely drop the slash. Django cannot
         # redirect a POST without losing its body, so this used to be a 500.
