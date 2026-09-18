@@ -214,26 +214,13 @@ def _payload(
     plan: FuelPlan,
     token: str,
 ) -> dict[str, Any]:
-    """The response, as plain JSON-ready data so the cache stores it verbatim."""
+    """The response, as plain JSON-ready data so the cache stores it verbatim.
+
+    The order is for the reader. The fuelling answer comes first and the route
+    geometry last: the geometry runs to tens of thousands of points, so in
+    Postman anything placed after it is about 100,000 lines down.
+    """
     return {
-        "request": {"start": _endpoint(start), "finish": _endpoint(finish)},
-        "vehicle": {
-            "max_range_miles": round(request.max_range_miles, 2),
-            "mpg": round(request.mpg, 2),
-            "tank_gallons": round(request.tank_gallons, 2),
-            "max_detour_miles": round(request.max_detour_miles, 2),
-        },
-        "route": {
-            "total_distance_miles": round(route.distance_miles, 2),
-            "total_duration_hours": round(route.duration_hours, 2),
-            "geometry": {
-                "type": "LineString",
-                "coordinates": [
-                    [round(point.lon, 5), round(point.lat, 5)] for point in route.geometry
-                ],
-            },
-            "shape_points": route.shape_points,
-        },
         "fuel": {
             "feasible": plan.feasible,
             "infeasible_stretch": _stretch(plan, sequence, route.distance_miles),
@@ -246,6 +233,13 @@ def _payload(
             "savings_percent": _round(plan.savings_percent, 2),
         },
         "fuel_stops": [_stop(stop) for stop in plan.stops],
+        "request": {"start": _endpoint(start), "finish": _endpoint(finish)},
+        "vehicle": {
+            "max_range_miles": round(request.max_range_miles, 2),
+            "mpg": round(request.mpg, 2),
+            "tank_gallons": round(request.tank_gallons, 2),
+            "max_detour_miles": round(request.max_detour_miles, 2),
+        },
         "meta": {
             "external_api_calls": route.provider_calls,
             "cached": False,
@@ -254,6 +248,17 @@ def _payload(
             "candidates_considered": len(sequence),
             "map_url": reverse("route-map", kwargs={"route_token": token}),
             "route_token": token,
+        },
+        "route": {
+            "total_distance_miles": round(route.distance_miles, 2),
+            "total_duration_hours": round(route.duration_hours, 2),
+            "shape_points": route.shape_points,
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                    [round(point.lon, 5), round(point.lat, 5)] for point in route.geometry
+                ],
+            },
         },
     }
 
