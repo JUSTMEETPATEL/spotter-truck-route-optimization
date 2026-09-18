@@ -1,0 +1,262 @@
+{
+  "generated_at": "2026-09-17T22:54:07+00:00",
+  "gazetteer_entries": 182946,
+  "observations_read": 8151,
+  "non_us_observations_dropped": 620,
+  "unusable_observations_dropped": 0,
+  "stations_total": 6626,
+  "stations_geocoded": 6625,
+  "stations_excluded": 1,
+  "stations_out_of_us_bounds": 0,
+  "stations_from_overrides": 12,
+  "gazetteer_coverage": 0.999849,
+  "coverage_by_state": {
+    "AL": {
+      "stations": 162,
+      "geocoded": 162,
+      "coverage": 1.0
+    },
+    "AR": {
+      "stations": 116,
+      "geocoded": 116,
+      "coverage": 1.0
+    },
+    "AZ": {
+      "stations": 132,
+      "geocoded": 132,
+      "coverage": 1.0
+    },
+    "CA": {
+      "stations": 8,
+      "geocoded": 8,
+      "coverage": 1.0
+    },
+    "CO": {
+      "stations": 99,
+      "geocoded": 99,
+      "coverage": 1.0
+    },
+    "CT": {
+      "stations": 25,
+      "geocoded": 25,
+      "coverage": 1.0
+    },
+    "DE": {
+      "stations": 15,
+      "geocoded": 15,
+      "coverage": 1.0
+    },
+    "FL": {
+      "stations": 189,
+      "geocoded": 189,
+      "coverage": 1.0
+    },
+    "GA": {
+      "stations": 284,
+      "geocoded": 284,
+      "coverage": 1.0
+    },
+    "IA": {
+      "stations": 220,
+      "geocoded": 220,
+      "coverage": 1.0
+    },
+    "ID": {
+      "stations": 61,
+      "geocoded": 61,
+      "coverage": 1.0
+    },
+    "IL": {
+      "stations": 329,
+      "geocoded": 329,
+      "coverage": 1.0
+    },
+    "IN": {
+      "stations": 212,
+      "geocoded": 212,
+      "coverage": 1.0
+    },
+    "KS": {
+      "stations": 127,
+      "geocoded": 127,
+      "coverage": 1.0
+    },
+    "KY": {
+      "stations": 120,
+      "geocoded": 120,
+      "coverage": 1.0
+    },
+    "LA": {
+      "stations": 196,
+      "geocoded": 196,
+      "coverage": 1.0
+    },
+    "MA": {
+      "stations": 44,
+      "geocoded": 44,
+      "coverage": 1.0
+    },
+    "MD": {
+      "stations": 64,
+      "geocoded": 64,
+      "coverage": 1.0
+    },
+    "ME": {
+      "stations": 30,
+      "geocoded": 30,
+      "coverage": 1.0
+    },
+    "MI": {
+      "stations": 164,
+      "geocoded": 164,
+      "coverage": 1.0
+    },
+    "MN": {
+      "stations": 175,
+      "geocoded": 175,
+      "coverage": 1.0
+    },
+    "MO": {
+      "stations": 249,
+      "geocoded": 249,
+      "coverage": 1.0
+    },
+    "MS": {
+      "stations": 141,
+      "geocoded": 141,
+      "coverage": 1.0
+    },
+    "MT": {
+      "stations": 44,
+      "geocoded": 44,
+      "coverage": 1.0
+    },
+    "NC": {
+      "stations": 195,
+      "geocoded": 195,
+      "coverage": 1.0
+    },
+    "ND": {
+      "stations": 59,
+      "geocoded": 59,
+      "coverage": 1.0
+    },
+    "NE": {
+      "stations": 111,
+      "geocoded": 111,
+      "coverage": 1.0
+    },
+    "NH": {
+      "stations": 23,
+      "geocoded": 23,
+      "coverage": 1.0
+    },
+    "NJ": {
+      "stations": 112,
+      "geocoded": 112,
+      "coverage": 1.0
+    },
+    "NM": {
+      "stations": 107,
+      "geocoded": 107,
+      "coverage": 1.0
+    },
+    "NV": {
+      "stations": 71,
+      "geocoded": 71,
+      "coverage": 1.0
+    },
+    "NY": {
+      "stations": 113,
+      "geocoded": 113,
+      "coverage": 1.0
+    },
+    "OH": {
+      "stations": 262,
+      "geocoded": 262,
+      "coverage": 1.0
+    },
+    "OK": {
+      "stations": 182,
+      "geocoded": 182,
+      "coverage": 1.0
+    },
+    "OR": {
+      "stations": 29,
+      "geocoded": 29,
+      "coverage": 1.0
+    },
+    "PA": {
+      "stations": 217,
+      "geocoded": 216,
+      "coverage": 0.9954
+    },
+    "RI": {
+      "stations": 2,
+      "geocoded": 2,
+      "coverage": 1.0
+    },
+    "SC": {
+      "stations": 181,
+      "geocoded": 181,
+      "coverage": 1.0
+    },
+    "SD": {
+      "stations": 62,
+      "geocoded": 62,
+      "coverage": 1.0
+    },
+    "TN": {
+      "stations": 162,
+      "geocoded": 162,
+      "coverage": 1.0
+    },
+    "TX": {
+      "stations": 776,
+      "geocoded": 776,
+      "coverage": 1.0
+    },
+    "UT": {
+      "stations": 93,
+      "geocoded": 93,
+      "coverage": 1.0
+    },
+    "VA": {
+      "stations": 198,
+      "geocoded": 198,
+      "coverage": 1.0
+    },
+    "VT": {
+      "stations": 16,
+      "geocoded": 16,
+      "coverage": 1.0
+    },
+    "WA": {
+      "stations": 52,
+      "geocoded": 52,
+      "coverage": 1.0
+    },
+    "WI": {
+      "stations": 295,
+      "geocoded": 295,
+      "coverage": 1.0
+    },
+    "WV": {
+      "stations": 38,
+      "geocoded": 38,
+      "coverage": 1.0
+    },
+    "WY": {
+      "stations": 64,
+      "geocoded": 64,
+      "coverage": 1.0
+    }
+  },
+  "excluded_cities": [
+    {
+      "city": "Etters",
+      "state": "PA",
+      "stations": 1
+    }
+  ]
+}

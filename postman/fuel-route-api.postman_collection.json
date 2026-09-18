@@ -1,0 +1,494 @@
+{
+  "info": {
+    "name": "Fuel Route API",
+    "description": "Cheapest legal sequence of diesel purchases for a truck route inside the USA.\n\nSet `base_url` (default http://127.0.0.1:8000). Every request below is reproducible against a fresh clone: `uv sync`, `manage.py migrate`, `manage.py load_stations`, `manage.py runserver`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8000"
+    }
+  ],
+  "item": [
+    {
+      "name": "Route",
+      "item": [
+        {
+          "name": "Dallas to Chicago",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route"
+              ]
+            },
+            "description": "The headline case: 961 miles, five Stops, one external call. Run it twice to see meta.cached and zero calls.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"Dallas, TX\",\n  \"finish\": \"Chicago, IL\"\n}"
+            }
+          }
+        },
+        {
+          "name": "New York to Miami",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route"
+              ]
+            },
+            "description": "1,280 miles, and the clearest saving against the Naive Driver (about 15%).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"New York, NY\",\n  \"finish\": \"Miami, FL\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Portland ME to San Diego",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route"
+              ]
+            },
+            "description": "3,130 miles and 21 Stops: the long-route case.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"Portland, ME\",\n  \"finish\": \"San Diego, CA\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Coordinates instead of names",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route"
+              ]
+            },
+            "description": "The same route as Dallas to Chicago, by coordinate. Same Route Token, so it answers from the cache.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"32.793333,-96.766513\",\n  \"finish\": \"41.837045,-87.684939\"\n}"
+            }
+          }
+        },
+        {
+          "name": "A smaller truck",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route"
+              ]
+            },
+            "description": "mpg and max_range_miles are request-overridable; tank_gallons is derived from them.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"Atlanta, GA\",\n  \"finish\": \"Nashville, TN\",\n  \"mpg\": 6.5,\n  \"max_range_miles\": 300\n}"
+            }
+          }
+        },
+        {
+          "name": "Wider Corridor",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route"
+              ]
+            },
+            "description": "max_detour_miles widens the Corridor, so more Candidates are considered.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"Denver, CO\",\n  \"finish\": \"Kansas City, MO\",\n  \"max_detour_miles\": 25\n}"
+            }
+          }
+        },
+        {
+          "name": "GET, for a browser",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/route/?start=Dallas, TX&finish=Chicago, IL",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route"
+              ],
+              "query": [
+                {
+                  "key": "start",
+                  "value": "Dallas, TX"
+                },
+                {
+                  "key": "finish",
+                  "value": "Chicago, IL"
+                }
+              ]
+            },
+            "description": "The same endpoint over GET, for pasting into an address bar."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Answers that are not errors",
+      "item": [
+        {
+          "name": "Los Angeles to Phoenix: infeasible",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route"
+              ]
+            },
+            "description": "200 with fuel.feasible false. Eight California Stations are in the supplied file and none is within 30 miles of Los Angeles, so the API names the stretch instead of inventing a price.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"Los Angeles, CA\",\n  \"finish\": \"Phoenix, AZ\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Seattle to Anchorage: infeasible",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route"
+              ]
+            },
+            "description": "2,268 miles, about 1,200 of them through British Columbia and Yukon where every row was dropped as non-US. The route is still returned.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"Seattle, WA\",\n  \"finish\": \"Anchorage, AK\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Errors",
+      "item": [
+        {
+          "name": "Unknown place: 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route"
+              ]
+            },
+            "description": "The message names what could not be resolved.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"Atlantis, TX\",\n  \"finish\": \"Chicago, IL\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Outside the USA: 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route"
+              ]
+            },
+            "description": "Toronto resolves, but Ontario is not a US state.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"Dallas, TX\",\n  \"finish\": \"Toronto, ON\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Outside the USA by coordinate: 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route"
+              ]
+            },
+            "description": "Mexico City: no US place within 50 miles. The error names the closest one.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"19.4326,-99.1332\",\n  \"finish\": \"Dallas, TX\"\n}"
+            }
+          }
+        },
+        {
+          "name": "No road route: 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route"
+              ]
+            },
+            "description": "Honolulu is an island; the provider says so and the API returns 404.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"Honolulu, HI\",\n  \"finish\": \"Dallas, TX\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Parameter out of range: 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "route"
+              ]
+            },
+            "description": "mpg is bounded 1-20, and the error names the bound.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"Dallas, TX\",\n  \"finish\": \"Chicago, IL\",\n  \"mpg\": 99\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Everything else",
+      "item": [
+        {
+          "name": "Health and dataset coverage",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/health/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "health"
+              ]
+            },
+            "description": "Station count, excluded count, Gazetteer coverage per state, and the active backends."
+          }
+        },
+        {
+          "name": "Browse Stations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/stations/?state=TX&search=pilot",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stations"
+              ],
+              "query": [
+                {
+                  "key": "state",
+                  "value": "TX"
+                },
+                {
+                  "key": "search",
+                  "value": "pilot"
+                }
+              ]
+            },
+            "description": "All 6,625 Stations as loaded, before the collapse onto coordinates."
+          }
+        },
+        {
+          "name": "Swagger UI",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/docs/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "docs"
+              ]
+            },
+            "description": "The published schema, including the parameter bounds."
+          }
+        }
+      ]
+    }
+  ]
+}
