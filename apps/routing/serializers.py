@@ -162,6 +162,9 @@ class MetaSerializer(serializers.Serializer):
     candidates_considered = serializers.IntegerField()
     map_url = serializers.CharField()
     route_token = serializers.CharField()
+    optimizer = serializers.CharField(
+        help_text="Which implementation of the greedy rule computed this plan."
+    )
 
 
 class RoutePlanSerializer(serializers.Serializer):

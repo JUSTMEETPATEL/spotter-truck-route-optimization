@@ -168,6 +168,51 @@ class TestRoutePlanning:
         assert response.json()["fuel"]["infeasible_stretch"]["gap_miles"] > 500
 
 
+class TestVersionTwo:
+    def post_v2(self, client, **payload):
+        body = {"start": "Westville, KS", "finish": "Eastville, OH"} | payload
+        return client.post(reverse("route-v2"), body, format="json")
+
+    def test_v2_plans_the_same_route(self, client, provider, stations):
+        response = self.post_v2(client)
+        assert response.status_code == 200
+        assert response.json()["fuel"]["feasible"] is True
+
+    def test_v2_returns_exactly_what_v1_returns(self, client, provider, stations):
+        one = post(client).json()
+        two = self.post_v2(client).json()
+        assert one["meta"]["optimizer"] == "scan"
+        assert two["meta"]["optimizer"] == "monotonic-stack+sparse-table"
+        # Everything else, down to the cent and the Stop order, matches.
+        volatile = {"optimizer", "compute_ms", "cached"}
+        assert {k: v for k, v in two["meta"].items() if k not in volatile} == {
+            k: v for k, v in one["meta"].items() if k not in volatile
+        }
+        assert {k: v for k, v in two.items() if k != "meta"} == {
+            k: v for k, v in one.items() if k != "meta"
+        }
+
+    def test_each_version_costs_its_own_external_call_then_caches(self, client, provider, stations):
+        post(client)
+        assert provider.calls == 1
+        self.post_v2(client)
+        assert provider.calls == 2
+        assert self.post_v2(client).json()["meta"]["cached"] is True
+        assert provider.calls == 2
+
+    def test_a_map_link_works_whichever_version_made_it(self, client, provider, stations):
+        plan = self.post_v2(client).json()
+        assert client.get(plan["meta"]["map_url"]).status_code == 200
+
+    def test_v2_answers_without_the_trailing_slash_too(self, client, provider, stations):
+        response = client.post(
+            "/api/v2/route",
+            {"start": "Westville, KS", "finish": "Eastville, OH"},
+            format="json",
+        )
+        assert response.status_code == 200
+
+
 class TestValidation:
     def test_a_missing_finish_is_rejected(self, client, provider):
         response = client.post(reverse("route"), {"start": "Westville, KS"}, format="json")

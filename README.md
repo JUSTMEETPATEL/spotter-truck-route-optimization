@@ -65,6 +65,7 @@ python manage.py migrate && python manage.py load_stations && python manage.py r
 | Endpoint | What it does |
 |---|---|
 | `POST /api/v1/route/` | Plan a route and its fuel stops. `GET` with query parameters does the same, for a browser |
+| `POST /api/v2/route/` | The identical plan, computed with a monotonic stack and a sparse table instead of two linear scans. See [Two optimizers](#two-optimizers-apiv1route-and-apiv2route) |
 | `GET /api/v1/route/map/<route_token>/` | Leaflet page: the route, numbered stop pins, price popups |
 | `GET /api/v1/stations/` | Browse the price file as loaded. Filter by `state`, search by `search` |
 | `GET /api/v1/health/` | Liveness, station counts, **the excluded count**, per-state coverage, active backends |
@@ -269,6 +270,39 @@ solves it with scipy, and compares **total cost only** at relative tolerance
 falling, runs of identical prices, a gap of exactly 500 miles, gaps at 499 and
 501, and a single-candidate route. Ties in price admit many optimal purchase
 vectors, so asserting on gallons would flake against scipy's choice of pivot.
+
+### Two optimizers: `/api/v1/route/` and `/api/v2/route/`
+
+Same request, same response, same answer to the cent. They differ in how the
+greedy rule answers its two questions:
+
+| | v1 `scan` | v2 `monotonic-stack+sparse-table` |
+|---|---|---|
+| Cheaper candidate ahead? | walk forward until one is found | **monotonic stack**, one right-to-left pass, O(n) for all candidates |
+| Cheapest within range? | minimum over the reachable slice | **sparse table**, O(1) per query after an O(n log n) build, built lazily on first use |
+
+`meta.optimizer` says which one answered. A test asserts the two endpoints
+return byte-identical payloads apart from that field, and the indexed plan is
+checked against the same scipy linear program.
+
+**It is not faster on a real request, and the measurements say why.** 93% of a
+request is the routing call (859 ms of 922 ms before the polyline change), and
+a real corridor holds 86–142 candidates, where both optimizers finish in under
+a millisecond. `uv run python benchmarks/optimizer_scaling.py`, offline:
+
+| Prices | Candidates | v1 scan | v2 indexed | Speed-up |
+|---|---|---|---|---|
+| random | 25,600 | 6.6 ms | 45.6 ms | **0.1×** |
+| rising | 25,600 | 194.9 ms | 65.6 ms | **3.0×** |
+| falling | 25,600 | 81.9 ms | 20.1 ms | **4.1×** |
+
+The price profile decides the winner. Rising prices are the scan's worst case:
+nothing ahead is ever cheaper, so every step walks the whole reachable window
+and the walk visits every candidate — that's where precomputation repays
+itself. On random prices, which is what a real corridor looks like, the walk
+takes few steps and the O(n log n) build is never repaid, so the scan wins by
+5×. That is why **v1 remains the default** and v2 is offered alongside it
+rather than replacing it.
 
 **Feasibility** runs over the whole sequence `[start, candidates…,
 destination]`, including the final leg to the destination. The first gap is
@@ -496,7 +530,7 @@ so that a fresh clone runs.
 ## Tests
 
 ```bash
-uv run pytest                 # 329 tests, no network
+uv run pytest                 # 363 tests, no network
 uv run pytest -m live         # 3 more, against the real OSRM. Run before a demo
 uv run ruff check . && uv run mypy apps config
 ```
@@ -518,6 +552,7 @@ The ones worth knowing about:
 | Feasibility | Gaps between candidates, the final leg to the destination, and the empty-tank first gap |
 | Cache policy | Identical payload on repeat, shared token across input forms, infeasible cached, 503 not cached |
 | Bounds | Every parameter at and beyond each limit |
+| v1 vs v2 | Both optimizers agree on 86 adversarial layouts, 300 random ones and every worked case; the endpoints return identical payloads apart from `meta.optimizer` |
 | Geocoding | Overrides beat the Gazetteer, per-state coverage arithmetic, unresolved excluded *and counted*, and coordinates that cannot be in the USA rejected rather than used |
 | Build gate | Low coverage warns by default and fails under `--strict` |
 | Endpoints | Hawaii accepted as the USA, then 404 from the provider's real `NoRoute` body |
@@ -539,6 +574,8 @@ apps/routing/
   geo.py                  haversine, planar approximation, unit constants
   corridor.py             thinning, grid buckets, exact segment projection
   optimizer.py            minimum-cost refuelling, feasibility, Naive Driver
+  optimizer_v2.py         the same plan from a monotonic stack and a sparse
+                          table; serves /api/v2/route/
   providers.py            OSRM: timeout, retry, geometry
   resolver.py             offline endpoint resolution, US containment
   services.py             orchestration + caching; the only module that knows
@@ -546,7 +583,8 @@ apps/routing/
   serializers.py          validation, bounds, published response shape
   views.py                HTTP surface only
   exceptions.py           domain errors mapped to status codes
-benchmarks/               offline spacing sweep over a committed geometry
+benchmarks/               offline spacing sweep over a committed geometry,
+                          and the v1-vs-v2 optimizer scaling sweep
 data/                     supplied CSV, committed Gazetteer, geocoded output,
                           hand corrections, build report
 tests/                    one file per module above
