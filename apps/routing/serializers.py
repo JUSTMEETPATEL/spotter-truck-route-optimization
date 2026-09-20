@@ -155,6 +155,12 @@ class FuelStopSerializer(serializers.Serializer):
 class MetaSerializer(serializers.Serializer):
     external_api_calls = serializers.IntegerField()
     cached = serializers.BooleanField()
+    provider_ms = serializers.FloatField(
+        help_text=(
+            "Of compute_ms, the part spent waiting on the routing provider, "
+            "retries included. Zero when the road came from a cache."
+        )
+    )
     compute_ms = serializers.FloatField(
         help_text="What this caller waited for, cache lookup included."
     )

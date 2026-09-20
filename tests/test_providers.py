@@ -3,6 +3,7 @@
 import pytest
 import requests
 
+from apps.routing import providers
 from apps.routing.exceptions import NoRouteFound, RoutingProviderUnavailable
 from apps.routing.geo import Point
 from apps.routing.providers import (
@@ -332,3 +333,53 @@ class TestRoadRouteCaching:
         caching(FakeInnerProvider(), cache=store).route(DALLAS, CHICAGO)
         (entry,) = store.store.values()
         assert entry["geometry"] == OK_GEOMETRY
+
+
+class FakeClock:
+    """Stands in for the ``time`` module, advancing only when told to."""
+
+    def __init__(self, readings: list[float]):
+        self._readings = list(readings)
+
+    def perf_counter(self) -> float:
+        # The last reading repeats, so a test only states what it cares about.
+        return self._readings.pop(0) if len(self._readings) > 1 else self._readings[0]
+
+
+class TestProviderTiming:
+    def test_a_route_reports_what_the_call_took(self, recorder, monkeypatch):
+        monkeypatch.setattr(providers, "time", FakeClock([10.0, 10.847]))
+        route = client().route(DALLAS, CHICAGO)
+        assert route.provider_ms == 847.0
+
+    def test_a_retried_call_reports_the_whole_wait_not_the_last_attempt(
+        self, recorder, monkeypatch
+    ):
+        # The shape of a wobbling demo server: one attempt hangs to the
+        # timeout, the retry succeeds, and the caller waited for both.
+        recorder.replies = [requests.Timeout("too slow"), FakeResponse(OK_BODY)]
+        monkeypatch.setattr(providers, "time", FakeClock([10.0, 25.0]))
+        route = client().route(DALLAS, CHICAGO)
+        assert route.provider_calls == 2
+        assert route.provider_ms == 15000.0
+
+    def test_a_cached_road_reports_no_provider_time(self):
+        inner = FakeInnerProvider(
+            route=Route(
+                geometry=decode_polyline(OK_GEOMETRY),
+                distance_miles=966.6,
+                duration_hours=17.1,
+                provider_calls=1,
+                provider_ms=847.0,
+            )
+        )
+        provider = caching(inner)
+        assert provider.route(DALLAS, CHICAGO).provider_ms == 847.0
+        # Second time nothing leaves the process, so nothing is waited for.
+        assert provider.route(DALLAS, CHICAGO).provider_ms == 0.0
+
+    def test_provider_time_is_not_stored_in_the_cache_entry(self):
+        store = DictCache()
+        caching(FakeInnerProvider(), cache=store).route(DALLAS, CHICAGO)
+        (entry,) = store.store.values()
+        assert "provider_ms" not in entry

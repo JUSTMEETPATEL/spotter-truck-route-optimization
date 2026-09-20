@@ -354,3 +354,40 @@ class TestRoadCacheAcrossVehicles:
             with pytest.raises(RoutingProviderUnavailable):
                 run(request_for(), provider=provider)
         assert inner.calls == 2
+
+
+class TestProviderTimeInMeta:
+    def test_the_response_reports_what_the_routing_call_took(self, stations):
+        slow = FakeProvider(
+            route=Route(
+                geometry=straight_route().geometry,
+                distance_miles=966.6,
+                duration_hours=17.1,
+                provider_calls=1,
+                provider_ms=847.0,
+            )
+        )
+        payload, _ = run(provider=slow)
+        # Reported as the provider measured it, not remeasured here. (In
+        # production provider_ms is a part of compute_ms; a fake that claims a
+        # wait it never took cannot be held to that, so it is not asserted.)
+        assert payload["meta"]["provider_ms"] == 847.0
+        assert payload["meta"]["external_api_calls"] == 1
+
+    def test_a_cached_plan_reports_no_provider_time(self, stations):
+        run()
+        repeated, _ = run()
+        assert repeated["meta"]["cached"] is True
+        assert repeated["meta"]["provider_ms"] == 0.0
+
+    def test_a_cached_road_reports_no_provider_time_either(self, stations):
+        inner = FakeProvider()
+        provider = CachingRouteProvider(
+            inner, cache=cache, ttl_seconds=86400, coord_decimals=4, namespace="x"
+        )
+        run(request_for(), provider=provider)
+        # Different vehicle: a fresh plan, off a road that cost nothing to get.
+        second, _ = run(request_for(mpg=8.0), provider=provider)
+        assert second["meta"]["cached"] is False
+        assert second["meta"]["external_api_calls"] == 0
+        assert second["meta"]["provider_ms"] == 0.0
