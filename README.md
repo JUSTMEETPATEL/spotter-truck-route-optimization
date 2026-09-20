@@ -97,10 +97,6 @@ sources:
 
 182,946 place keys after deduplication, 8.2 MB, committed to the repo.
 
-> **TODO — the Overpass experiment.** One or two sentences: what you tried
-> with the Overpass API, and why you dropped it in favour of the committed
-> gazetteer. It is not recorded anywhere in the repo, so it needs your words.
-
 Matching is the part the data actually forced. Strip exactly **one** Census
 suffix ("Oklahoma City city" is Oklahoma City, not Oklahoma — stripping
 repeatedly cost 4 points of coverage). Strip `(balance)` first. Fold accents
