@@ -219,12 +219,13 @@ detour on *every* route, so only the cheapest can ever be worth choosing. All
 ```
 POST /api/v1/route/
   ├─ 1. Resolve both endpoints      committed Gazetteer      0 calls
-  ├─ 2. Check the cache             LocMem or Redis          0 calls
-  ├─ 3. Fetch the route             OSRM                     1 call   ← the only egress
-  ├─ 4. Match the corridor          in-memory candidates     0 calls
-  ├─ 5. Choose the stops            greedy optimizer         0 calls
-  ├─ 6. Price the Naive Driver      same route, no prices    0 calls
-  └─ 7. Serialise, cache, respond
+  ├─ 2. Check the plan cache        LocMem or Redis          0 calls
+  ├─ 3. Check the road cache        LocMem or Redis          0 calls
+  ├─ 4. Fetch the route             OSRM                     1 call   ← the only egress
+  ├─ 5. Match the corridor          in-memory candidates     0 calls
+  ├─ 6. Choose the stops            greedy optimizer         0 calls
+  ├─ 7. Price the Naive Driver      same route, no prices    0 calls
+  └─ 8. Serialise, cache, respond
 ```
 
 A test asserts the call count is exactly one for an uncached request and zero
@@ -337,18 +338,50 @@ at 0.5, 10 and 50 mile corridors.
 
 ### Caching
 
-The **route token is the cache key**: a truncated SHA-256 of the resolved
-endpoints and vehicle parameters, with coordinates rounded to 4 decimal places
-(~11 m) so that `"Dallas"`, `"dallas, tx"` and `"32.7767,-96.7970"` collapse
-onto one entry. The same request therefore always yields the same map URL, with
-no token store to maintain and no link that dies on a process restart.
+Two layers, because they answer two different questions.
 
-Successes cache for 24 hours. **Infeasible results cache too** — deterministic
-and expensive to recompute. **503s never cache**, or one provider wobble
-poisons a route for a day. The map page recomputes through the same service
-when its cache entry has expired and the request parameters are on the query
-string, so a shared link costs one routing call rather than 404-ing in the
-middle of a demo.
+**The plan cache** is keyed on the **route token**: a truncated SHA-256 of the
+resolved endpoints *and the vehicle parameters*, with coordinates rounded to 4
+decimal places (~11 m) so that `"Dallas"`, `"dallas, tx"` and
+`"32.7767,-96.7970"` collapse onto one entry. The same request therefore always
+yields the same map URL, with no token store to maintain and no link that dies
+on a process restart.
+
+**The road cache** sits one layer down, inside the provider, and is keyed on
+the **rounded endpoints alone**. The vehicle belongs in the plan key because
+the plan depends on it; the road does not. Change `mpg` from 10 to 8 and the
+road between the same two places is byte-identical, yet the plan key changes —
+so before this layer existed, that request paid the full routing call again.
+That call is **93% of an uncached request**, so it is the only part worth
+removing:
+
+| Second request for a pair already fetched | Before | After |
+|---|---|---|
+| Same vehicle (plan cache hit) | ~1 ms | ~1 ms |
+| Different `mpg`, range or detour | ~945 ms, 1 call | **~99 ms, 0 calls** |
+| The other optimizer (`/api/v2/`) | ~945 ms, 1 call | **~99 ms, 0 calls** |
+
+Measured across Atlanta → Denver, Phoenix → Seattle and Boston → Miami, warm
+process, median. The remaining ~99 ms is corridor matching and serialising,
+which genuinely *do* depend on the parameters and so must re-run.
+
+The road cache stores the **encoded polyline**, not the decoded points: the
+same geometry in 33 KB of string rather than ~9,000 pickled `Point`s, and about
+a millisecond to decode again. Its key carries the provider's base URL, so a
+self-hosted HGV profile never serves a route cached from the public car
+profile.
+
+Successes cache for 24 hours in both layers. **Infeasible results cache too** —
+deterministic and expensive to recompute. **Failures never cache** in either
+layer: not a 503, or one provider wobble poisons a route for a day; and not a
+`NoRoute`, which the provider may answer differently once it is healthy. The
+map page recomputes through the same service when its cache entry has expired
+and the request parameters are on the query string, so a shared link costs one
+routing call rather than 404-ing in the middle of a demo.
+
+Both layers are LocMem by default and Redis when `REDIS_URL` is set. LocMem
+dies with the process, so a restart pays full price for the first request to
+each pair again; Redis is what makes the saving survive a deploy.
 
 ---
 
@@ -449,7 +482,9 @@ remainder.
 | New York → Miami | 1,280 | 1.13 s | 4 | $377.15 | $444.82 | 15.2% |
 | Portland ME → San Diego | 3,130 | 2.06 s | 21 | $961.46 | $1,109.67 | 13.4% |
 
-A cached repeat of any of them is **under 2 ms and zero external calls**. Every
+A cached repeat of any of them is **under 2 ms and zero external calls**, and
+re-running one with a different truck is **~99 ms and zero external calls** —
+see the road cache above. Every
 response carries `meta.compute_ms`, which is what *that* caller waited for —
 the cached path reports its own figure rather than replaying the first
 caller's — so none of the above has to be taken on trust.
@@ -505,6 +540,7 @@ environment. There are no magic numbers elsewhere in the source tree. See
 | `OSRM_TIMEOUT_SECONDS` | 10.0 | no |
 | `OSRM_RETRIES` | 1 | no |
 | `ROUTE_CACHE_TTL_SECONDS` | 86400 | no |
+| `ROAD_CACHE_TTL_SECONDS` | 86400 | no |
 | `ROUTE_TOKEN_LENGTH` | 16 | no |
 
 Four more are read only by `build_gazetteer`, the one command that downloads
@@ -551,6 +587,7 @@ The ones worth knowing about:
 | Distance arithmetic | Haversine against published figures (LAX→JFK 2,475 mi; the equator) rather than against itself |
 | Feasibility | Gaps between candidates, the final leg to the destination, and the empty-tank first gap |
 | Cache policy | Identical payload on repeat, shared token across input forms, infeasible cached, 503 not cached |
+| Road cache | Reused across vehicles and across both optimizers, namespaced per provider, failures never cached, geometry stored encoded |
 | Bounds | Every parameter at and beyond each limit |
 | v1 vs v2 | Both optimizers agree on 86 adversarial layouts, 300 random ones and every worked case; the endpoints return identical payloads apart from `meta.optimizer` |
 | Geocoding | Overrides beat the Gazetteer, per-state coverage arithmetic, unresolved excluded *and counted*, and coordinates that cannot be in the USA rejected rather than used |

@@ -5,9 +5,11 @@ from django.core.cache import cache
 
 from apps.routing.exceptions import RoutingProviderUnavailable
 from apps.routing.geo import Point
-from apps.routing.providers import Route
+from apps.routing.providers import CachingRouteProvider, Route
 from apps.routing.services import (
     CACHE_KEY_TEMPLATE,
+    INDEXED,
+    SCANNING,
     RouteRequest,
     plan_route,
     route_token,
@@ -300,3 +302,55 @@ class TestFuelFigures:
         assert stretch["from"] == "Westville, KS (mile 0.0)"
         assert stretch["to"] == "destination (mile 966.6)"
         assert stretch["gap_miles"] == pytest.approx(966.6, abs=0.1)
+
+
+class TestRoadCacheAcrossVehicles:
+    """The road between two places does not depend on the truck driving it."""
+
+    def road_cached(self, inner):
+        return CachingRouteProvider(
+            inner,
+            cache=cache,
+            ttl_seconds=86400,
+            coord_decimals=4,
+            namespace="https://router.example.org",
+        )
+
+    def test_a_different_vehicle_reuses_the_road(self, stations):
+        inner = FakeProvider()
+        provider = self.road_cached(inner)
+        first, _ = run(request_for(), provider=provider)
+        second, _ = run(request_for(mpg=8.0), provider=provider)
+        # A different plan, off the same road, with nothing leaving the process.
+        assert second["meta"]["route_token"] != first["meta"]["route_token"]
+        assert second["meta"]["cached"] is False
+        assert inner.calls == 1
+        assert second["meta"]["external_api_calls"] == 0
+
+    def test_the_other_optimizer_reuses_the_road_too(self, stations):
+        inner = FakeProvider()
+        provider = self.road_cached(inner)
+        run(request_for(), provider=provider)
+        payload = plan_route(
+            request_for(), optimizer=INDEXED, provider=provider, gazetteer=gazetteer()
+        )
+        assert inner.calls == 1
+        assert payload["meta"]["external_api_calls"] == 0
+
+    def test_the_plan_is_the_same_whether_the_road_was_cached_or_not(self, stations):
+        inner = FakeProvider()
+        provider = self.road_cached(inner)
+        first, _ = run(request_for(), provider=provider)
+        cache.delete(
+            CACHE_KEY_TEMPLATE.format(optimizer=SCANNING, token=first["meta"]["route_token"])
+        )
+        second, _ = run(request_for(), provider=provider)
+        assert second | {"meta": first["meta"]} == first
+
+    def test_a_provider_that_is_down_is_not_remembered_as_a_road(self, stations):
+        inner = FakeProvider(error=RoutingProviderUnavailable("down"))
+        provider = self.road_cached(inner)
+        for _ in range(2):
+            with pytest.raises(RoutingProviderUnavailable):
+                run(request_for(), provider=provider)
+        assert inner.calls == 2

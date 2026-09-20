@@ -4,9 +4,16 @@ Swapping OSRM for another engine should touch this file and nothing else. The
 public demo server is the default because it needs no API key, which is what
 lets a fresh clone work; it is a development service on a car profile, and a
 real deployment would self-host OSRM with an HGV profile.
+
+``CachingRouteProvider`` wraps any of them. It is here rather than in
+``services.py`` because remembering a road route is a fact about the provider,
+not about the flow; the cache and its tunables are handed in, so this module
+still imports nothing from Django.
 """
 
+import hashlib
 from dataclasses import dataclass
+from typing import Any, Protocol
 
 import requests
 
@@ -24,6 +31,13 @@ POLYLINE_PRECISION = 5
 #: Provider codes that mean "no such route", as opposed to "provider broken".
 _NO_ROUTE_CODES = frozenset({"NoRoute", "NoSegment", "NoTrips"})
 
+ROAD_CACHE_KEY_TEMPLATE = "fuel-route:road:{token}"
+
+#: Characters of the road cache digest kept. Sixteen hex characters is 64 bits;
+#: this is an internal key with no URL to appear in, so it only has to not
+#: collide, not be short.
+_ROAD_TOKEN_LENGTH = 16
+
 
 @dataclass(frozen=True)
 class Route:
@@ -37,6 +51,91 @@ class Route:
     @property
     def shape_points(self) -> int:
         return len(self.geometry)
+
+
+class RouteProvider(Protocol):
+    def route(self, start: Point, finish: Point) -> Route: ...
+
+
+class Cache(Protocol):
+    """The slice of the Django cache interface the road cache uses."""
+
+    def get(self, key: str) -> Any: ...
+    def set(self, key: str, value: Any, timeout: int | None = ...) -> Any: ...
+
+
+class CachingRouteProvider:
+    """Remembers road routes independently of the truck driving them.
+
+    The plan cache upstream is keyed on the vehicle parameters, because the
+    plan depends on them. The road does not: change ``mpg`` from 10 to 8 and
+    the route between the same two places is byte-identical, yet the plan cache
+    misses and the provider is called again. That call is 93% of an uncached
+    request, so this layer is where the time actually goes.
+
+    Only successes are stored. A provider that is down, and a pair of points no
+    road connects, are both answers that might differ next time or that would
+    otherwise be remembered for a day; the existing rule that failures never
+    cache is kept.
+    """
+
+    def __init__(
+        self,
+        inner: RouteProvider,
+        *,
+        cache: Cache,
+        ttl_seconds: int,
+        coord_decimals: int,
+        namespace: str,
+    ) -> None:
+        self._inner = inner
+        self._cache = cache
+        self._ttl_seconds = ttl_seconds
+        self._coord_decimals = coord_decimals
+        self._namespace = namespace
+
+    def route(self, start: Point, finish: Point) -> Route:
+        key = self._key(start, finish)
+        stored = self._cache.get(key)
+        if stored is not None:
+            return Route(
+                geometry=decode_polyline(stored["geometry"]),
+                distance_miles=stored["distance_miles"],
+                duration_hours=stored["duration_hours"],
+                # Nothing left the process, and the meta block says so.
+                provider_calls=0,
+            )
+
+        route = self._inner.route(start, finish)
+        self._cache.set(
+            key,
+            {
+                # Encoded, not decoded: the same points in 33 KB of string
+                # rather than ~9,000 pickled Points, and about a millisecond
+                # to decode again.
+                "geometry": encode_polyline(route.geometry),
+                "distance_miles": route.distance_miles,
+                "duration_hours": route.duration_hours,
+            },
+            self._ttl_seconds,
+        )
+        return route
+
+    def _key(self, start: Point, finish: Point) -> str:
+        """A digest of the rounded endpoints, under the provider's namespace.
+
+        The namespace is part of it because a self-hosted HGV profile and the
+        public car profile answer the same question differently, and a stale
+        entry from one must not be served as the other.
+        """
+        decimals = self._coord_decimals
+        parts = (
+            self._namespace,
+            f"{round(start.lat, decimals)},{round(start.lon, decimals)}",
+            f"{round(finish.lat, decimals)},{round(finish.lon, decimals)}",
+        )
+        digest = hashlib.sha256("|".join(parts).encode()).hexdigest()
+        return ROAD_CACHE_KEY_TEMPLATE.format(token=digest[:_ROAD_TOKEN_LENGTH])
 
 
 class OsrmClient:
@@ -143,6 +242,29 @@ def decode_polyline(encoded: str, precision: int = POLYLINE_PRECISION) -> list[P
                 lon += delta
         points.append(Point(round(lat / scale, precision), round(lon / scale, precision)))
     return points
+
+
+def encode_polyline(points: list[Point], precision: int = POLYLINE_PRECISION) -> str:
+    """Encode points into an encoded polyline, the inverse of ``decode_polyline``.
+
+    Lossless for geometry that came out of ``decode_polyline``, which has
+    already rounded to ``precision`` places.
+    """
+    encoded: list[str] = []
+    scale = 10**precision
+    last_lat = last_lon = 0
+
+    for point in points:
+        lat, lon = round(point.lat * scale), round(point.lon * scale)
+        for delta in (lat - last_lat, lon - last_lon):
+            # Sign-encoded: shifted left one bit, inverted when negative.
+            value = ~(delta << 1) if delta < 0 else delta << 1
+            while value >= 0x20:
+                encoded.append(chr((0x20 | (value & 0x1F)) + 63))
+                value >>= 5
+            encoded.append(chr(value + 63))
+        last_lat, last_lon = lat, lon
+    return "".join(encoded)
 
 
 def _parse(payload: dict, provider_calls: int) -> Route:

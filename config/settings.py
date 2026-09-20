@@ -44,6 +44,7 @@ env = environ.Env(
     OSRM_TIMEOUT_SECONDS=(float, 10.0),
     OSRM_RETRIES=(int, 1),
     ROUTE_CACHE_TTL_SECONDS=(int, 86400),
+    ROAD_CACHE_TTL_SECONDS=(int, 86400),
     ROUTE_TOKEN_LENGTH=(int, 16),
 )
 environ.Env.read_env(BASE_DIR / ".env")
@@ -146,7 +147,10 @@ OSRM_BASE_URL = env("OSRM_BASE_URL")
 OSRM_TIMEOUT_SECONDS = env("OSRM_TIMEOUT_SECONDS")
 OSRM_RETRIES = env("OSRM_RETRIES")
 
+#: How long a whole plan is remembered, keyed on endpoints and vehicle.
 ROUTE_CACHE_TTL_SECONDS = env("ROUTE_CACHE_TTL_SECONDS")
+#: How long the road between two endpoints is remembered, whatever the vehicle.
+ROAD_CACHE_TTL_SECONDS = env("ROAD_CACHE_TTL_SECONDS")
 ROUTE_TOKEN_LENGTH = env("ROUTE_TOKEN_LENGTH")
 
 # --- Committed data files ---------------------------------------------------
