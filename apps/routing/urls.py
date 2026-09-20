@@ -14,6 +14,7 @@ from apps.routing import views
 # service generates (map_url included) keeps its slash.
 _API_ROUTES: list[tuple[str, Callable[..., Any], str]] = [
     ("v1/route/", views.RouteView.as_view(), "route"),
+    ("v2/route/", views.RouteV2View.as_view(), "route-v2"),
     ("v1/route/map/<str:route_token>/", views.route_map, "route-map"),
     ("v1/stations/", views.StationListView.as_view(), "station-list"),
     ("v1/health/", views.HealthView.as_view(), "health"),

@@ -236,7 +236,10 @@ class TestDisclosure:
         first, _ = run()
         assert first["meta"]["compute_ms"] > 0
 
-        stored = cache.get(CACHE_KEY_TEMPLATE.format(token=first["meta"]["route_token"]))
+        key = CACHE_KEY_TEMPLATE.format(
+            optimizer=first["meta"]["optimizer"], token=first["meta"]["route_token"]
+        )
+        stored = cache.get(key)
         second, _ = run()
         # A warm cache hit can be faster than the reporting resolution, so
         # this is the honest bound.
@@ -244,12 +247,7 @@ class TestDisclosure:
         # The cached entry keeps the first caller's figure untouched, and the
         # repeat reports its own rather than replaying that one.
         assert stored["meta"]["compute_ms"] == first["meta"]["compute_ms"]
-        assert (
-            cache.get(CACHE_KEY_TEMPLATE.format(token=first["meta"]["route_token"]))["meta"][
-                "compute_ms"
-            ]
-            == first["meta"]["compute_ms"]
-        )
+        assert cache.get(key)["meta"]["compute_ms"] == first["meta"]["compute_ms"]
 
     def test_the_map_url_carries_the_route_token(self, stations):
         payload, _ = run()

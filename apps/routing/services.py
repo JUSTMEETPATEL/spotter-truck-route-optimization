@@ -21,6 +21,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.urls import reverse
 
+from apps.routing import optimizer_v2
 from apps.routing.corridor import Candidate, MatchedCandidate, match_corridor
 from apps.routing.exceptions import MapLinkUnavailable
 from apps.routing.geo import Point, haversine_miles
@@ -30,7 +31,14 @@ from apps.routing.resolver import ResolvedEndpoint, resolve_endpoint
 from apps.stations.geocoding import Gazetteer, load_gazetteer
 from apps.stations.registry import candidates as registry_candidates
 
-CACHE_KEY_TEMPLATE = "fuel-route:plan:{token}"
+CACHE_KEY_TEMPLATE = "fuel-route:plan:{optimizer}:{token}"
+
+#: The two implementations of the greedy rule. They return identical plans;
+#: they differ in how they answer "cheaper Candidate ahead?" and "cheapest
+#: within Range?" -- by scanning, or from precomputed indexes.
+SCANNING = "scan"
+INDEXED = "monotonic-stack+sparse-table"
+OPTIMIZERS = {SCANNING: plan_purchases, INDEXED: optimizer_v2.plan_purchases}
 
 
 @dataclass(frozen=True)
@@ -64,6 +72,7 @@ class RouteProvider(Protocol):
 def plan_route(
     request: RouteRequest,
     *,
+    optimizer: str = SCANNING,
     provider: RouteProvider | None = None,
     gazetteer: Gazetteer | None = None,
     corridor_candidates: list[Candidate] | None = None,
@@ -80,7 +89,7 @@ def plan_route(
     finish = resolve_endpoint(request.finish, gazetteer, radius)
 
     token = route_token(start.point, finish.point, request)
-    cached = cache.get(CACHE_KEY_TEMPLATE.format(token=token))
+    cached = cache.get(CACHE_KEY_TEMPLATE.format(optimizer=optimizer, token=token))
     if cached is not None:
         return cached | {
             "meta": cached["meta"]
@@ -110,10 +119,16 @@ def plan_route(
     origin_fill = _origin_fill(start.point, all_candidates)
     sequence = _with_origin_fill(matched, origin_fill)
 
-    plan = plan_purchases(sequence, route.distance_miles, request.max_range_miles, request.mpg)
-    payload = _payload(request, start, finish, route, matched, sequence, plan, token)
+    plan = OPTIMIZERS[optimizer](
+        sequence, route.distance_miles, request.max_range_miles, request.mpg
+    )
+    payload = _payload(request, start, finish, route, matched, sequence, plan, token, optimizer)
     payload["meta"]["compute_ms"] = _elapsed_ms(started)
-    cache.set(CACHE_KEY_TEMPLATE.format(token=token), payload, settings.ROUTE_CACHE_TTL_SECONDS)
+    cache.set(
+        CACHE_KEY_TEMPLATE.format(optimizer=optimizer, token=token),
+        payload,
+        settings.ROUTE_CACHE_TTL_SECONDS,
+    )
     return payload
 
 
@@ -125,9 +140,10 @@ def plan_for_map(route_token: str, request: RouteRequest | None) -> dict[str, An
     one routing call rather than 404-ing someone mid-demo. The recomputed plan
     has to hash back to the same token, or the link is not describing it.
     """
-    cached = cache.get(CACHE_KEY_TEMPLATE.format(token=route_token))
-    if cached is not None:
-        return cached
+    for optimizer in OPTIMIZERS:
+        cached = cache.get(CACHE_KEY_TEMPLATE.format(optimizer=optimizer, token=route_token))
+        if cached is not None:
+            return cached
     if request is None:
         raise MapLinkUnavailable(
             "This map link has expired. Re-run the route for a fresh one, or add "
@@ -213,6 +229,7 @@ def _payload(
     sequence: list[MatchedCandidate],
     plan: FuelPlan,
     token: str,
+    optimizer: str,
 ) -> dict[str, Any]:
     """The response, as plain JSON-ready data so the cache stores it verbatim.
 
@@ -248,6 +265,7 @@ def _payload(
             "candidates_considered": len(sequence),
             "map_url": reverse("route-map", kwargs={"route_token": token}),
             "route_token": token,
+            "optimizer": optimizer,
         },
         "route": {
             "total_distance_miles": round(route.distance_miles, 2),

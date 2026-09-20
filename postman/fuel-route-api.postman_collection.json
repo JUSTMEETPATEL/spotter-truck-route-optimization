@@ -221,6 +221,69 @@
       ]
     },
     {
+      "name": "v2: the indexed optimizer",
+      "item": [
+        {
+          "name": "New York to Miami (v2)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "route",
+                ""
+              ]
+            },
+            "description": "The same plan from /api/v2/route/, where a monotonic stack and a sparse table replace the optimizer's two linear scans. Compare meta.optimizer with the v1 response: everything else is identical.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"New York, NY\",\n  \"finish\": \"Miami, FL\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Dallas to Chicago (v2)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v2/route/",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v2",
+                "route",
+                ""
+              ]
+            },
+            "description": "Same Stops and same total as v1, computed from precomputed indexes.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"start\": \"Dallas, TX\",\n  \"finish\": \"Chicago, IL\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "Answers that are not errors",
       "item": [
         {

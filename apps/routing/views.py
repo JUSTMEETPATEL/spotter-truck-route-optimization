@@ -30,7 +30,7 @@ from apps.routing.serializers import (
     RouteRequestSerializer,
     StationSerializer,
 )
-from apps.routing.services import plan_for_map, plan_route, tank_gallons
+from apps.routing.services import INDEXED, SCANNING, plan_for_map, plan_route, tank_gallons
 from apps.stations import registry
 from apps.stations.models import Station
 
@@ -45,6 +45,8 @@ ERROR_STATUSES: dict[type[FuelRouteError], int] = {
 
 class RouteView(APIView):
     """Plan the cheapest legal sequence of diesel purchases along a route."""
+
+    optimizer = SCANNING
 
     @extend_schema(
         request=RouteRequestSerializer,
@@ -83,7 +85,7 @@ class RouteView(APIView):
                 detail=serializer.errors,
             )
         try:
-            payload = plan_route(serializer.to_route_request())
+            payload = plan_route(serializer.to_route_request(), optimizer=self.optimizer)
         except FuelRouteError as error:
             return _error_response(
                 _code(error),
@@ -92,6 +94,17 @@ class RouteView(APIView):
                 detail=error.detail,
             )
         return Response(payload)
+
+
+class RouteV2View(RouteView):
+    """The same plan, computed from precomputed indexes.
+
+    Identical request and response; a monotonic stack and a sparse table
+    replace the two linear scans inside the optimizer. ``meta.optimizer`` says
+    which one answered.
+    """
+
+    optimizer = INDEXED
 
 
 class HealthView(APIView):
