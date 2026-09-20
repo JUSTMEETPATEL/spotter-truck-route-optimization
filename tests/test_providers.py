@@ -1,12 +1,19 @@
-"""The OSRM client: URL shape, parsing, retries and call counting."""
+"""The OSRM client: URL shape, parsing, retries, call counting and the road cache."""
 
 import pytest
 import requests
 
 from apps.routing.exceptions import NoRouteFound, RoutingProviderUnavailable
 from apps.routing.geo import Point
-from apps.routing.providers import OsrmClient, decode_polyline
+from apps.routing.providers import (
+    CachingRouteProvider,
+    OsrmClient,
+    Route,
+    decode_polyline,
+    encode_polyline,
+)
 from tests.conftest import FakeResponse
+from tests.conftest import encode_polyline as reference_encode
 
 DALLAS = Point(32.7767, -96.7970)
 CHICAGO = Point(41.8781, -87.6298)
@@ -176,3 +183,152 @@ class TestFailures:
         recorder.replies = [FakeResponse({"code": "Ok", "routes": [{"distance": 1.0}]})]
         with pytest.raises(RoutingProviderUnavailable):
             client().route(DALLAS, CHICAGO)
+
+
+class TestPolylineEncoding:
+    """The encoder the road cache stores geometry with."""
+
+    def test_the_worked_example_from_the_polyline_specification(self):
+        assert (
+            encode_polyline([Point(38.5, -120.2), Point(40.7, -120.95), Point(43.252, -126.453)])
+            == "_p~iF~ps|U_ulLnnqC_mqNvxq`@"
+        )
+
+    def test_it_round_trips_the_geometry_the_provider_returned(self):
+        points = decode_polyline(OK_GEOMETRY)
+        assert encode_polyline(points) == OK_GEOMETRY
+
+    def test_it_agrees_with_the_independent_encoder_in_conftest(self):
+        # conftest's encoder was written separately, to build provider stubs.
+        points = [Point(32.7767, -96.797), Point(35.1, -92.4), Point(41.8781, -87.6298)]
+        assert encode_polyline(points) == reference_encode(
+            [(point.lat, point.lon) for point in points]
+        )
+
+    def test_an_empty_route_encodes_to_nothing(self):
+        assert encode_polyline([]) == ""
+
+
+class FakeInnerProvider:
+    """A RouteProvider that counts what the cache let through to it."""
+
+    def __init__(self, route: Route | None = None, error: Exception | None = None):
+        self._route = route or Route(
+            geometry=decode_polyline(OK_GEOMETRY),
+            distance_miles=966.6,
+            duration_hours=17.1,
+            provider_calls=1,
+        )
+        self._error = error
+        self.calls = 0
+
+    def route(self, start: Point, finish: Point) -> Route:
+        self.calls += 1
+        if self._error is not None:
+            raise self._error
+        return self._route
+
+
+def caching(inner: FakeInnerProvider, **overrides) -> CachingRouteProvider:
+    defaults = {
+        "cache": DictCache(),
+        "ttl_seconds": 86400,
+        "coord_decimals": 4,
+        "namespace": "https://router.example.org",
+    }
+    return CachingRouteProvider(inner, **(defaults | overrides))
+
+
+class DictCache:
+    """The slice of the Django cache interface the wrapper uses."""
+
+    def __init__(self):
+        self.store: dict[str, object] = {}
+
+    def get(self, key):
+        return self.store.get(key)
+
+    def set(self, key, value, timeout=None):
+        self.store[key] = value
+
+
+class TestRoadRouteCaching:
+    def test_the_first_call_reaches_the_provider(self):
+        inner = FakeInnerProvider()
+        route = caching(inner).route(DALLAS, CHICAGO)
+        assert inner.calls == 1
+        assert route.provider_calls == 1
+
+    def test_the_second_call_for_the_same_pair_does_not(self):
+        inner = FakeInnerProvider()
+        provider = caching(inner)
+        provider.route(DALLAS, CHICAGO)
+        route = provider.route(DALLAS, CHICAGO)
+        assert inner.calls == 1
+        assert route.provider_calls == 0
+
+    def test_a_cached_route_is_returned_intact(self):
+        inner = FakeInnerProvider()
+        provider = caching(inner)
+        first = provider.route(DALLAS, CHICAGO)
+        second = provider.route(DALLAS, CHICAGO)
+        assert second.geometry == first.geometry
+        assert second.distance_miles == first.distance_miles
+        assert second.duration_hours == first.duration_hours
+
+    def test_a_different_pair_is_a_different_entry(self):
+        inner = FakeInnerProvider()
+        provider = caching(inner)
+        provider.route(DALLAS, CHICAGO)
+        provider.route(CHICAGO, DALLAS)
+        assert inner.calls == 2
+
+    def test_coordinates_that_round_together_share_an_entry(self):
+        inner = FakeInnerProvider()
+        provider = caching(inner)
+        provider.route(DALLAS, CHICAGO)
+        provider.route(Point(DALLAS.lat + 0.000001, DALLAS.lon), CHICAGO)
+        assert inner.calls == 1
+
+    def test_a_different_provider_does_not_reuse_the_entry(self):
+        shared = DictCache()
+        first = FakeInnerProvider()
+        second = FakeInnerProvider()
+        caching(first, cache=shared).route(DALLAS, CHICAGO)
+        caching(second, cache=shared, namespace="https://other.example.org").route(DALLAS, CHICAGO)
+        assert second.calls == 1
+
+    def test_a_provider_failure_is_not_cached(self):
+        inner = FakeInnerProvider(error=RoutingProviderUnavailable("down"))
+        provider = caching(inner)
+        for _ in range(2):
+            with pytest.raises(RoutingProviderUnavailable):
+                provider.route(DALLAS, CHICAGO)
+        assert inner.calls == 2
+
+    def test_an_impossible_route_is_not_cached_either(self):
+        inner = FakeInnerProvider(error=NoRouteFound("nowhere"))
+        provider = caching(inner)
+        for _ in range(2):
+            with pytest.raises(NoRouteFound):
+                provider.route(DALLAS, CHICAGO)
+        assert inner.calls == 2
+
+    def test_the_entry_is_stored_under_the_configured_ttl(self):
+        class RecordingCache(DictCache):
+            timeout = None
+
+            def set(self, key, value, timeout=None):
+                self.timeout = timeout
+                super().set(key, value, timeout)
+
+        store = RecordingCache()
+        caching(FakeInnerProvider(), cache=store, ttl_seconds=60).route(DALLAS, CHICAGO)
+        assert store.timeout == 60
+
+    def test_geometry_is_stored_encoded_rather_than_as_points(self):
+        # 33 KB of string beats ~9,000 pickled Points in LocMem or Redis.
+        store = DictCache()
+        caching(FakeInnerProvider(), cache=store).route(DALLAS, CHICAGO)
+        (entry,) = store.store.values()
+        assert entry["geometry"] == OK_GEOMETRY

@@ -1,12 +1,17 @@
 """Orchestration and caching: the only module that knows the whole flow.
 
-    resolve endpoints  committed Gazetteer   0 calls
-    check the cache    LocMem or Redis       0 calls
-    fetch the route    routing provider      1 call   <- the only egress
-    match the Corridor in-memory Candidates  0 calls
-    choose the Stops   greedy optimizer      0 calls
-    price the Naive Driver                   0 calls
+    resolve endpoints     committed Gazetteer   0 calls
+    check the plan cache  LocMem or Redis       0 calls
+    check the road cache  LocMem or Redis       0 calls
+    fetch the route       routing provider      1 call   <- the only egress
+    match the Corridor    in-memory Candidates  0 calls
+    choose the Stops      greedy optimizer      0 calls
+    price the Naive Driver                      0 calls
     serialise, cache, respond
+
+The two caches answer two questions. The plan cache is keyed on the endpoints
+and the vehicle; the road cache, one layer down inside the provider, is keyed
+on the endpoints alone, because the road does not depend on the truck.
 
 Everything below this module is a component that could be reused or replaced on
 its own; nothing below it knows there is an HTTP request involved.
@@ -15,7 +20,7 @@ its own; nothing below it knows there is an HTTP request involved.
 import hashlib
 import time
 from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
 from django.conf import settings
 from django.core.cache import cache
@@ -26,7 +31,7 @@ from apps.routing.corridor import Candidate, MatchedCandidate, match_corridor
 from apps.routing.exceptions import MapLinkUnavailable
 from apps.routing.geo import Point, haversine_miles
 from apps.routing.optimizer import FuelPlan, Stop, plan_purchases
-from apps.routing.providers import OsrmClient, Route
+from apps.routing.providers import CachingRouteProvider, OsrmClient, Route, RouteProvider
 from apps.routing.resolver import ResolvedEndpoint, resolve_endpoint
 from apps.stations.geocoding import Gazetteer, load_gazetteer
 from apps.stations.registry import candidates as registry_candidates
@@ -63,10 +68,6 @@ def tank_gallons(max_range_miles: float, mpg: float) -> float:
     50 gallons while the two fields beside it said otherwise.
     """
     return max_range_miles / mpg
-
-
-class RouteProvider(Protocol):
-    def route(self, start: Point, finish: Point) -> Route: ...
 
 
 def plan_route(
@@ -179,12 +180,24 @@ def route_token(start: Point, finish: Point, request: RouteRequest) -> str:
     return digest[: settings.ROUTE_TOKEN_LENGTH]
 
 
-def default_provider() -> OsrmClient:
-    """The configured routing provider."""
-    return OsrmClient(
-        base_url=settings.OSRM_BASE_URL,
-        timeout_seconds=settings.OSRM_TIMEOUT_SECONDS,
-        retries=settings.OSRM_RETRIES,
+def default_provider() -> RouteProvider:
+    """The configured routing provider, behind the road cache.
+
+    Two layers, because they answer different questions. The plan cache above
+    is keyed on the vehicle; this one is keyed on the two endpoints alone, so a
+    second request for the same pair with a different ``mpg`` still skips the
+    only call that leaves the process.
+    """
+    return CachingRouteProvider(
+        OsrmClient(
+            base_url=settings.OSRM_BASE_URL,
+            timeout_seconds=settings.OSRM_TIMEOUT_SECONDS,
+            retries=settings.OSRM_RETRIES,
+        ),
+        cache=cache,
+        ttl_seconds=settings.ROAD_CACHE_TTL_SECONDS,
+        coord_decimals=settings.COORD_ROUNDING_DECIMALS,
+        namespace=settings.OSRM_BASE_URL,
     )
 
 

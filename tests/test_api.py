@@ -184,7 +184,10 @@ class TestVersionTwo:
         assert one["meta"]["optimizer"] == "scan"
         assert two["meta"]["optimizer"] == "monotonic-stack+sparse-table"
         # Everything else, down to the cent and the Stop order, matches.
-        volatile = {"optimizer", "compute_ms", "cached"}
+        # external_api_calls is volatile because it is a fact about this
+        # request rather than about the plan: v1 fetched the road, so v2 found
+        # it in the road cache and fetched nothing.
+        volatile = {"optimizer", "compute_ms", "cached", "external_api_calls"}
         assert {k: v for k, v in two["meta"].items() if k not in volatile} == {
             k: v for k, v in one["meta"].items() if k not in volatile
         }
@@ -192,13 +195,19 @@ class TestVersionTwo:
             k: v for k, v in one.items() if k != "meta"
         }
 
-    def test_each_version_costs_its_own_external_call_then_caches(self, client, provider, stations):
+    def test_the_second_version_reuses_the_first_version_road(self, client, provider, stations):
+        # The two versions differ in how they choose Stops, not in where the
+        # road goes, so only the first request leaves the process. The plan
+        # caches are still separate: v2 computes its own plan, from that road.
         post(client)
         assert provider.calls == 1
-        self.post_v2(client)
-        assert provider.calls == 2
+        second = self.post_v2(client).json()
+        assert provider.calls == 1
+        assert second["meta"]["cached"] is False
+        assert second["meta"]["external_api_calls"] == 0
+        # And now v2 has a plan cached of its own.
         assert self.post_v2(client).json()["meta"]["cached"] is True
-        assert provider.calls == 2
+        assert provider.calls == 1
 
     def test_a_map_link_works_whichever_version_made_it(self, client, provider, stations):
         plan = self.post_v2(client).json()
