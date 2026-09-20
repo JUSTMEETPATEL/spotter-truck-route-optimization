@@ -25,12 +25,16 @@ uv run manage.py load_stations      # 6,625 truckstops from the committed CSV, 0
 uv run manage.py runserver
 ```
 
-```console
-$ curl -s -X POST localhost:8000/api/v1/route/ \
-    -H 'Content-Type: application/json' \
-    -d '{"start": "New York, NY", "finish": "Miami, FL"}' | jq '.fuel, .meta.external_api_calls'
+```bash
+curl -s -X POST localhost:8000/api/v1/route/ -H 'Content-Type: application/json' -d '{"start":"New York, NY","finish":"Miami, FL"}'
+```
+
+One line, no dependencies beyond `curl`. The `fuel` block of the reply:
+
+```json
 {
   "feasible": true,
+  "infeasible_stretch": null,
   "total_gallons": 128.01,
   "total_cost_usd": 377.15,
   "average_price_per_gallon": 2.946,
@@ -39,8 +43,13 @@ $ curl -s -X POST localhost:8000/api/v1/route/ \
   "savings_usd": 67.67,
   "savings_percent": 15.21
 }
-1
 ```
+
+The full reply also carries the stops, the echoed request, the vehicle, `meta`
+and the route geometry. If you have `jq`, append `| jq .fuel` to see just the
+block above, or `| jq .meta` for the call count and timings — the first request
+for a route reports `"external_api_calls": 1`, and a repeat reports `0`.
+
 
 Swagger at <http://127.0.0.1:8000/api/docs/>. Every response carries
 `meta.map_url` — open it for a Leaflet page with the route drawn and each stop
