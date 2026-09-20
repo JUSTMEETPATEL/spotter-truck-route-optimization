@@ -10,23 +10,21 @@ from apps.routing.geo import Point
 from apps.stations import geocoding, registry
 from apps.stations.geocoding import Gazetteer, GazetteerPlace
 from apps.stations.models import Station
-from tests.conftest import FakeResponse
+from tests.conftest import FakeResponse, encode_polyline
 
 pytestmark = pytest.mark.django_db
 
 START = Point(40.0, -100.0)
 FINISH = Point(40.0, -81.6)
 
+#: A due-east route along the 40th parallel, as the provider encodes it.
 OSRM_BODY = {
     "code": "Ok",
     "routes": [
         {
             "distance": 1555625.3,
             "duration": 61571.0,
-            "geometry": {
-                "type": "LineString",
-                "coordinates": [[-100.0 + step * 0.1, 40.0] for step in range(185)],
-            },
+            "geometry": encode_polyline([(40.0, -100.0 + step * 0.1) for step in range(185)]),
         }
     ],
 }
