@@ -97,6 +97,9 @@ def plan_route(
             | {
                 "cached": True,
                 "external_api_calls": 0,
+                # Nothing was fetched for this caller, so nothing was waited
+                # for. The stored figure is what the first caller paid.
+                "provider_ms": 0.0,
                 # The stored figure is what the first caller waited for. This
                 # one is what this caller waited for, which is the point of
                 # reporting it.
@@ -273,6 +276,9 @@ def _payload(
         "meta": {
             "external_api_calls": route.provider_calls,
             "cached": False,
+            # Of the compute_ms below, this is the part that was the network.
+            # Zero means the road came from a cache.
+            "provider_ms": round(route.provider_ms, 2),
             "compute_ms": None,
             "stations_in_corridor": sum(entry.candidate.stations_at_location for entry in matched),
             "candidates_considered": len(sequence),

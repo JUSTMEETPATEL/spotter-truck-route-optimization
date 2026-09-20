@@ -12,6 +12,7 @@ still imports nothing from Django.
 """
 
 import hashlib
+import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -47,6 +48,10 @@ class Route:
     distance_miles: float
     duration_hours: float
     provider_calls: int
+    #: Wall-clock milliseconds spent talking to the provider, retries included,
+    #: so a slow answer can be blamed on the network rather than guessed at.
+    #: Zero when the route came from a cache and nothing left the process.
+    provider_ms: float = 0.0
 
     @property
     def shape_points(self) -> int:
@@ -104,6 +109,7 @@ class CachingRouteProvider:
                 duration_hours=stored["duration_hours"],
                 # Nothing left the process, and the meta block says so.
                 provider_calls=0,
+                provider_ms=0.0,
             )
 
         route = self._inner.route(start, finish)
@@ -168,6 +174,9 @@ class OsrmClient:
 
         attempts = 0
         last_error: Exception | None = None
+        # Started before the first attempt and read at whatever exit is taken,
+        # so a timeout that is retried is counted in full rather than lost.
+        began = time.perf_counter()
         while attempts <= self._retries:
             attempts += 1
             try:
@@ -197,7 +206,7 @@ class OsrmClient:
                     status_code=response.status_code,
                 )
             try:
-                return _parse(payload, attempts)
+                return _parse(payload, attempts, _ms_since(began))
             except (KeyError, IndexError, TypeError, ValueError) as error:
                 last_error = error
                 continue
@@ -267,7 +276,7 @@ def encode_polyline(points: list[Point], precision: int = POLYLINE_PRECISION) ->
     return "".join(encoded)
 
 
-def _parse(payload: dict, provider_calls: int) -> Route:
+def _parse(payload: dict, provider_calls: int, provider_ms: float) -> Route:
     route = payload["routes"][0]
     geometry = decode_polyline(route["geometry"])
     if len(geometry) < 2:
@@ -277,7 +286,12 @@ def _parse(payload: dict, provider_calls: int) -> Route:
         distance_miles=float(route["distance"]) / METRES_PER_MILE,
         duration_hours=float(route["duration"]) / SECONDS_PER_HOUR,
         provider_calls=provider_calls,
+        provider_ms=provider_ms,
     )
+
+
+def _ms_since(began: float) -> float:
+    return round((time.perf_counter() - began) * 1000, 2)
 
 
 def _trim(value: float) -> str:

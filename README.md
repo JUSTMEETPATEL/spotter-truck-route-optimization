@@ -484,10 +484,25 @@ remainder.
 
 A cached repeat of any of them is **under 2 ms and zero external calls**, and
 re-running one with a different truck is **~99 ms and zero external calls** —
-see the road cache above. Every
-response carries `meta.compute_ms`, which is what *that* caller waited for —
-the cached path reports its own figure rather than replaying the first
-caller's — so none of the above has to be taken on trust.
+see the road cache above. Every response carries `meta.compute_ms`, which is
+what *that* caller waited for — the cached path reports its own figure rather
+than replaying the first caller's — so none of the above has to be taken on
+trust.
+
+Beside it, **`meta.provider_ms` is the part of that wait which was the routing
+provider**, retries included. The two together say where a slow response went
+without anyone having to guess:
+
+| `provider_ms` | `external_api_calls` | What happened |
+|---|---|---|
+| `0.0` | `0` | Served from a cache; the rest of `compute_ms` is this service |
+| ~`850` | `1` | A normal cold call to the OSRM demo server |
+| ~`15000` | `2` | The demo server hung to the 10 s timeout and the retry succeeded |
+
+That last row is not hypothetical — the public demo server has no SLA, and a
+15-second response with `external_api_calls: 2` is it wobbling rather than
+anything in this codebase. It is the clearest argument for the road cache, and
+for self-hosting OSRM in production.
 
 Savings vary honestly with the corridor. Where truckstops are dense and prices
 tight (Dallas → Chicago), a driver who just stops when the tank runs low does
